@@ -16,6 +16,7 @@
     "typescript": "^7.0.2"
   },
   "dependencies": {
-    "@google/genai": "^2.19.0"
+    "@google/genai": "^2.19.0",
+    "@modelcontextprotocol/sdk": "^1.30.0"
   }
 }
