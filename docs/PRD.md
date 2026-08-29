@@ -125,6 +125,8 @@ Create this page in Notion? [y/N]
 | `memo show` | 最近のメモをキー操作で選択して表示する |
 | `memo show <id>` | IDを指定して表示する |
 | `memo search <query>` | 本文をローカル検索する |
+| `memo notion connect` | ブラウザでNotion MCPのOAuth認証を行う |
+| `memo notion status` | 接続中のNotionワークスペースを確認する |
 | `memo --help` | ヘルプを表示する |
 | `memo --version` | バージョンを表示する |
 
@@ -151,7 +153,7 @@ MVPでは読み取りToolsを中心にする。
 | `searchMemos` | キーワードでメモを検索する |
 | `readMemo` | 指定したメモの全文を読む |
 
-Notionへの作成は、エージェントが会話途中で自由に呼べるToolにはしない。エージェントがNotionページ案を最終出力し、CLIがユーザーの承認を得た後にNotionクライアントを呼び出す。
+Notion MCPが提供するToolは接続時に動的に取得する。ただし、Notionへの作成Toolはエージェントが会話途中で自由に呼べるToolにはしない。エージェントがNotionページ案を最終出力し、CLIがユーザーの承認を得た後にMCPクライアントから`notion-create-pages`を呼び出す。
 
 ### エージェント機能
 
@@ -187,11 +189,15 @@ Notionへの作成は、エージェントが会話途中で自由に呼べるTo
 
 ## Notion連携
 
-- MVPでは1つの保存先ページまたはデータベースを設定する
-- 認証情報と保存先IDは環境変数またはローカル設定で管理する
-- 認証情報をSQLite、ログ、Gitへ保存しない
+- CLI自身をMCPクライアントとして実装し、Notion APIを直接呼ばない
+- Notion公式のHosted MCP `https://mcp.notion.com/mcp`へStreamable HTTPで接続する
+- OAuth 2.0 Authorization Code + PKCEでユーザーが接続を許可する
+- MCP SDKを使って接続し、利用可能なToolを実行時に取得する
+- MVPでは1つの保存先ページまたはデータベースをローカル設定で管理する
+- OAuthトークンをSQLite、ログ、Gitへ保存せず、OSの安全な資格情報ストアを利用する
+- アクセストークンの期限切れ時はリフレッシュし、再認証が必要なら明示する
 - AIへ送る内容とNotionへ書く内容をプレビューで確認できるようにする
-- APIエラー時は元メモを保持し、再実行できるようにする
+- MCP接続やTool実行のエラー時は元メモを保持し、再実行できるようにする
 - 作成成功時はNotionページのURLを表示する
 
 ## 非ゴール
@@ -210,7 +216,7 @@ Notionへの作成は、エージェントが会話途中で自由に呼べるTo
 
 - AIを使わないメモ保存はネットワーク通信なしで即時に完了する
 - `ask`以外のコマンドではLLM APIを呼び出さない
-- APIキーやNotion認証情報をログへ出さない
+- APIキー、OAuthトークン、PKCE verifierをログへ出さない
 - 外部サービスの失敗で元メモを失わない
 - シェルコマンド実行Toolをエージェントへ与えない
 - LLM APIキーがなくても記録、一覧、表示、検索を利用できる
@@ -239,8 +245,10 @@ Notionへの作成は、エージェントが会話途中で自由に呼べるTo
 
 - [ ] AIがNotionページのタイトルと本文を提案できる
 - [ ] Notionへ送信する前にプレビューを表示できる
+- [ ] Hosted Notion MCPへOAuthで接続できる
+- [ ] 接続先ワークスペースと利用可能なToolを確認できる
 - [ ] 拒否した場合はNotionへ何も書き込まれない
-- [ ] 承認した場合だけNotionページが作成される
+- [ ] 承認した場合だけMCP ToolでNotionページが作成される
 - [ ] 作成したNotionページのURLを表示できる
 
 ## 開発フェーズ
@@ -260,15 +268,21 @@ Notionへの作成は、エージェントが会話途中で自由に呼べるTo
 - `searchMemos`と`readMemo`
 - 構造化されたNotionページ案
 
-### Phase 3：承認とNotion連携（MVP完成）
+### Phase 3：Notion MCP接続
+
+- MCP SDKとStreamable HTTPクライアント
+- OAuth 2.0 + PKCE認証
+- OAuthトークンの安全な保存と更新
+- Tool一覧の取得とワークスペース確認
+
+### Phase 4：承認とページ作成（MVP完成）
 
 - ページ案のプレビュー
 - 対話的な承認
-- Notion API接続
-- ページ作成とURL表示
+- `notion-create-pages`によるページ作成とURL表示
 - エラー処理と統合テスト
 
-### Phase 4：利用性の改善
+### Phase 5：利用性の改善
 
 - グローバルな`memo`コマンド化
 - 日時表示のローカル化
@@ -287,6 +301,7 @@ Notionへの作成は、エージェントが会話途中で自由に呼べるTo
 ## 未決事項
 
 - Notionの保存先をページ配下とデータベースのどちらにするか
+- OAuthトークンをmacOS Keychainへ保存する実装方法
 - Notionページ本文の既定テンプレート
 - AIへ送信するメモ範囲を実行前に表示するか
 - `memo ask`を対話入力でも利用できるようにするか
