@@ -1,0 +1,65 @@
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { MemoStore } from "../src/store";
+import { createMemoTools } from "../src/tools/memoTools";
+
+describe("memo tools", () => {
+  let store: MemoStore;
+
+  beforeEach(() => {
+    store = new MemoStore(":memory:");
+  });
+
+  afterEach(() => {
+    store.close();
+  });
+
+  test("listMemos returns summaries instead of full long bodies", async () => {
+    store.create("a".repeat(250));
+    const tool = findTool("listMemos");
+
+    const result = JSON.parse(await tool.execute({ limit: 5 }));
+
+    expect(result).toHaveLength(1);
+    expect(result[0].id).toBe(1);
+    expect(result[0].preview.endsWith("…")).toBeTrue();
+    expect(result[0].body).toBeUndefined();
+  });
+
+  test("searchMemos finds topic matches", async () => {
+    store.create("コンテキスト圧縮を試す");
+    store.create("買い物メモ");
+    const tool = findTool("searchMemos");
+
+    const result = JSON.parse(await tool.execute({ query: "圧縮" }));
+
+    expect(result).toHaveLength(1);
+    expect(result[0].preview).toContain("コンテキスト圧縮");
+  });
+
+  test("readMemo returns the full original memo", async () => {
+    const memo = store.create("first line\nsecond line");
+    const tool = findTool("readMemo");
+
+    const result = JSON.parse(await tool.execute({ id: memo.id }));
+
+    expect(result.body).toBe("first line\nsecond line");
+  });
+
+  test("readMemo rejects an invalid ID", async () => {
+    const tool = findTool("readMemo");
+
+    await expect(tool.execute({ id: -1 })).rejects.toThrow(
+      "id must be a positive integer",
+    );
+  });
+
+  function findTool(name: string) {
+    const tool = createMemoTools(store).find((candidate) => candidate.name === name);
+
+    if (!tool) {
+      throw new Error(`Tool ${name} not found`);
+    }
+
+    return tool;
+  }
+});

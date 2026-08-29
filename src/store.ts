@@ -17,6 +17,12 @@ export interface Memo {
   status: MemoStatus;
 }
 
+export interface ListMemosOptions {
+  createdFrom?: string;
+  createdTo?: string;
+  limit?: number;
+}
+
 interface MemoRow {
   id: number;
   body: string;
@@ -32,7 +38,10 @@ interface MemoRow {
 export class MemoStore {
   private readonly database: Database;
 
-  constructor(databasePath: string = getDatabasePath()) {
+  constructor(
+    databasePath: string = getDatabasePath(),
+    private readonly now: () => Date = () => new Date(),
+  ) {
     if (databasePath !== ":memory:") {
       mkdirSync(dirname(databasePath), { recursive: true });
     }
@@ -46,7 +55,7 @@ export class MemoStore {
       throw new Error("Memo body must not be empty");
     }
 
-    const timestamp = new Date().toISOString();
+    const timestamp = this.now().toISOString();
     const result = this.database
       .query(
         `INSERT INTO memos (body, created_at, updated_at)
@@ -106,6 +115,41 @@ export class MemoStore {
          LIMIT ?`,
       )
       .all(limit);
+
+    return rows.map(toMemo);
+  }
+
+  listByDate(options: ListMemosOptions = {}): Memo[] {
+    const limit = options.limit ?? 20;
+
+    if (!Number.isInteger(limit) || limit < 1) {
+      throw new Error("List limit must be a positive integer");
+    }
+
+    const createdFrom = options.createdFrom ?? null;
+    const createdTo = options.createdTo ?? null;
+    const rows = this.database
+      .query<
+        MemoRow,
+        [string | null, string | null, string | null, string | null, number]
+      >(
+        `SELECT
+           id,
+           body,
+           created_at,
+           updated_at,
+           project,
+           project_root,
+           title,
+           summary,
+           status
+         FROM memos
+         WHERE (? IS NULL OR created_at >= ?)
+           AND (? IS NULL OR created_at < ?)
+         ORDER BY id DESC
+         LIMIT ?`,
+      )
+      .all(createdFrom, createdFrom, createdTo, createdTo, limit);
 
     return rows.map(toMemo);
   }

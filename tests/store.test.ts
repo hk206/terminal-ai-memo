@@ -66,4 +66,26 @@ describe("MemoStore", () => {
       "Search query must not be empty",
     );
   });
+
+  test("lists memos inside an ISO date range", () => {
+    const timestamps = [
+      new Date("2026-08-29T12:00:00.000Z"),
+      new Date("2026-08-30T12:00:00.000Z"),
+    ];
+    const datedStore = new MemoStore(":memory:", () => timestamps.shift()!);
+
+    try {
+      datedStore.create("yesterday");
+      const today = datedStore.create("today");
+
+      expect(
+        datedStore.listByDate({
+          createdFrom: "2026-08-30T00:00:00.000Z",
+          createdTo: "2026-08-31T00:00:00.000Z",
+        }),
+      ).toEqual([today]);
+    } finally {
+      datedStore.close();
+    }
+  });
 });
