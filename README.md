@@ -12,7 +12,10 @@ Terminal AI Memo is a local-first CLI inbox for capturing thoughts without leavi
 
 ```bash
 bun install
+cp .env.example .env
 ```
+
+Add a Gemini API key from [Google AI Studio](https://aistudio.google.com/apikey) to `.env` when using `memo ask`. The local capture, list, show, and search commands do not require an API key.
 
 ## Usage
 
@@ -38,6 +41,14 @@ bun run memo show
 bun run memo show 1
 bun run memo search "context compression"
 ```
+
+Send a natural-language instruction to Gemini:
+
+```bash
+bun run memo ask "今日一日分のメモをまとめて"
+```
+
+Memo Tools are not connected to Gemini yet. At the current development stage, `memo ask` only verifies the model connection.
 
 On macOS, memos are stored by default at:
 

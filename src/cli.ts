@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 
+import { createGeminiAssistant } from "./gemini";
 import { readMemoInput } from "./input";
 import { selectOption } from "./select";
 import { MemoStore } from "./store";
@@ -20,6 +21,11 @@ async function main(): Promise<void> {
 
   if (args[0] === "search") {
     searchMemos(parseSearchQuery(args.slice(1)));
+    return;
+  }
+
+  if (args[0] === "ask") {
+    await askGemini(parseAskInstruction(args.slice(1)));
     return;
   }
 
@@ -65,6 +71,12 @@ function searchMemos(query: string): void {
   } finally {
     store.close();
   }
+}
+
+async function askGemini(instruction: string): Promise<void> {
+  const assistant = createGeminiAssistant();
+  const response = await assistant.ask(instruction);
+  console.log(response);
 }
 
 function printMemoSummaries(memos: Memo[], emptyMessage: string): void {
@@ -175,6 +187,16 @@ function parseSearchQuery(args: string[]): string {
   }
 
   return query;
+}
+
+function parseAskInstruction(args: string[]): string {
+  const instruction = args.join(" ").trim();
+
+  if (instruction.length === 0) {
+    throw new Error('Usage: memo ask "<instruction>"');
+  }
+
+  return instruction;
 }
 
 function createPreview(body: string): string {
