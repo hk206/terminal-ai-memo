@@ -5,6 +5,7 @@ import { readMemoInput } from "./input";
 import { selectOption } from "./select";
 import { MemoStore } from "./store";
 import type { Memo } from "./store";
+import { createMemoTools } from "./tools/memoTools";
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
@@ -74,6 +75,7 @@ function searchMemos(query: string): void {
 }
 
 async function askGemini(instruction: string): Promise<void> {
+  const store = new MemoStore();
   const assistant = createGeminiAssistant({
     onRetry: ({ status, nextAttempt, maxAttempts, delayMilliseconds }) => {
       const delaySeconds = (delayMilliseconds / 1_000).toFixed(1);
@@ -83,8 +85,18 @@ async function askGemini(instruction: string): Promise<void> {
       );
     },
   });
-  const response = await assistant.ask(instruction);
-  console.log(response);
+
+  try {
+    const response = await assistant.ask(instruction, {
+      tools: createMemoTools(store),
+      onToolCall: ({ name, args }) => {
+        console.error(`[tool] ${name}(${JSON.stringify(args)})`);
+      },
+    });
+    console.log(response);
+  } finally {
+    store.close();
+  }
 }
 
 function printMemoSummaries(memos: Memo[], emptyMessage: string): void {

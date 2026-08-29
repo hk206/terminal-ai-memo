@@ -228,11 +228,11 @@ Notionへの作成は、エージェントが会話途中で自由に呼べるTo
 
 ### AIエージェント
 
-- [ ] `memo ask "instruction"`で自然言語の依頼を渡せる
-- [ ] LLMが`listMemos`、`searchMemos`、`readMemo`を選択して実行できる
-- [ ] 複数回のTool呼び出し後に最終結果を返せる
-- [ ] 参照したメモIDを表示できる
-- [ ] 最大ステップ数でループを終了できる
+- [x] `memo ask "instruction"`で自然言語の依頼を渡せる
+- [x] LLMが`listMemos`、`searchMemos`、`readMemo`を選択して実行できる
+- [x] 複数回のTool呼び出し後に最終結果を返せる
+- [x] 参照したメモIDを表示できる
+- [x] 最大ステップ数でループを終了できる
 - [ ] 不正なTool引数と不正な最終出力を安全に処理できる
 
 ### Notion

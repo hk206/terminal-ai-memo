@@ -24,8 +24,137 @@ describe("GeminiAssistant", () => {
     expect(requests).toHaveLength(1);
     expect(requests[0]).toMatchObject({
       model: "gemini-3.6-flash",
-      contents: "今日のメモをまとめて",
+      contents: [
+        {
+          role: "user",
+          parts: [{ text: "今日のメモをまとめて" }],
+        },
+      ],
     });
+  });
+
+  test("executes a requested tool and sends its result back to Gemini", async () => {
+    const requests: any[] = [];
+    const toolCalls: unknown[] = [];
+    const assistant = new GeminiAssistant(async (request) => {
+      requests.push(request);
+
+      if (requests.length === 1) {
+        return {
+          functionCalls: [
+            { id: "call-1", name: "listMemos", args: { limit: 5 } },
+          ],
+          candidateContent: {
+            role: "model",
+            parts: [
+              {
+                functionCall: {
+                  id: "call-1",
+                  name: "listMemos",
+                  args: { limit: 5 },
+                },
+              },
+            ],
+          },
+        };
+      }
+
+      return { text: "Found memo #1." };
+    });
+
+    const result = await assistant.ask("今日のメモをまとめて", {
+      tools: [
+        {
+          name: "listMemos",
+          description: "List memos",
+          parameters: { type: "object" },
+          async execute(args) {
+            toolCalls.push(args);
+            return JSON.stringify([{ id: 1, preview: "test memo" }]);
+          },
+        },
+      ],
+      now: new Date("2026-08-30T01:00:00.000Z"),
+      timeZone: "Asia/Tokyo",
+    });
+
+    expect(result).toBe("Found memo #1.");
+    expect(toolCalls).toEqual([{ limit: 5 }]);
+    expect(requests).toHaveLength(2);
+    expect(requests[1].contents.at(-1)).toEqual({
+      role: "user",
+      parts: [
+        {
+          functionResponse: {
+            id: "call-1",
+            name: "listMemos",
+            response: {
+              output: [{ id: 1, preview: "test memo" }],
+            },
+          },
+        },
+      ],
+    });
+  });
+
+  test("returns tool errors to Gemini so it can recover", async () => {
+    let requestCount = 0;
+    const assistant = new GeminiAssistant(async (request) => {
+      requestCount += 1;
+
+      if (requestCount === 1) {
+        return {
+          functionCalls: [{ name: "missingTool", args: {} }],
+          candidateContent: {
+            role: "model",
+            parts: [{ functionCall: { name: "missingTool", args: {} } }],
+          },
+        };
+      }
+
+      const contents = request.contents as Array<Record<string, unknown>>;
+      expect(contents.at(-1)).toMatchObject({
+        parts: [
+          {
+            functionResponse: {
+              name: "missingTool",
+              response: { error: "Tool missingTool not found" },
+            },
+          },
+        ],
+      });
+      return { text: "I could not use that tool." };
+    });
+
+    await expect(
+      assistant.ask("Use a missing tool", { tools: [] }),
+    ).resolves.toBe("I could not use that tool.");
+  });
+
+  test("stops when the agent reaches its maximum step count", async () => {
+    const assistant = new GeminiAssistant(async () => ({
+      functionCalls: [{ name: "loopTool", args: {} }],
+      candidateContent: {
+        role: "model",
+        parts: [{ functionCall: { name: "loopTool", args: {} } }],
+      },
+    }));
+
+    await expect(
+      assistant.ask("Keep calling", {
+        tools: [
+          {
+            name: "loopTool",
+            description: "Loop forever",
+            parameters: { type: "object" },
+            async execute() {
+              return "ok";
+            },
+          },
+        ],
+        maxSteps: 2,
+      }),
+    ).rejects.toThrow("Agent reached the maximum step count (2)");
   });
 
   test("retries transient errors and eventually succeeds", async () => {

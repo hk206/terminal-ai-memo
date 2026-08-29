@@ -48,7 +48,9 @@ Send a natural-language instruction to Gemini:
 bun run memo ask "今日一日分のメモをまとめて"
 ```
 
-Memo Tools are not connected to Gemini yet. At the current development stage, `memo ask` only verifies the model connection.
+Gemini can use the read-only `listMemos`, `searchMemos`, and `readMemo` Tools to investigate local memos before answering. Tool calls are shown in the terminal while the agent runs.
+
+The Gemini API free tier may use submitted content to improve Google's products. Use synthetic or non-sensitive memos while developing with the free tier.
 
 On macOS, memos are stored by default at:
 
