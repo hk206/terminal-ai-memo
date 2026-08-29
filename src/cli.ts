@@ -1,7 +1,9 @@
 #!/usr/bin/env bun
 
 import { readMemoInput } from "./input";
+import { selectOption } from "./select";
 import { MemoStore } from "./store";
+import type { Memo } from "./store";
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
@@ -12,7 +14,7 @@ async function main(): Promise<void> {
   }
 
   if (args[0] === "show") {
-    showMemo(parseMemoId(args.slice(1), "show"));
+    await showMemoCommand(args.slice(1));
     return;
   }
 
@@ -58,39 +60,68 @@ function listMemos(limit: number): void {
   }
 }
 
-function showMemo(id: number): void {
+async function showMemoCommand(args: string[]): Promise<void> {
+  if (args.length > 1) {
+    throw new Error("Usage: memo show [id]");
+  }
+
   const store = new MemoStore();
 
   try {
-    const memo = store.findById(id);
+    if (args.length === 1) {
+      const id = parseMemoId(args[0]!);
+      const memo = store.findById(id);
 
-    if (!memo) {
-      throw new Error(`Memo #${id} not found`);
+      if (!memo) {
+        throw new Error(`Memo #${id} not found`);
+      }
+
+      printMemo(memo);
+      return;
     }
 
-    console.log(`#${memo.id}  ${memo.createdAt}  [${memo.status}]`);
+    const candidates = store.list(10);
 
-    if (memo.title) {
-      console.log(`Title: ${memo.title}`);
+    if (candidates.length === 0) {
+      console.log("No memos found.");
+      return;
     }
 
-    if (memo.project) {
-      console.log(`Project: ${memo.project}`);
+    const selectedMemo = await selectOption(
+      candidates.map((memo) => ({
+        label: `#${memo.id}  ${createPreview(memo.body)}`,
+        value: memo,
+      })),
+    );
+
+    if (!selectedMemo) {
+      console.log("Canceled.");
+      return;
     }
 
-    console.log();
-    console.log(memo.body);
+    printMemo(selectedMemo);
   } finally {
     store.close();
   }
 }
 
-function parseMemoId(args: string[], command: string): number {
-  if (args.length !== 1) {
-    throw new Error(`Usage: memo ${command} <id>`);
+function printMemo(memo: Memo): void {
+  console.log(`#${memo.id}  ${memo.createdAt}  [${memo.status}]`);
+
+  if (memo.title) {
+    console.log(`Title: ${memo.title}`);
   }
 
-  const id = Number(args[0]);
+  if (memo.project) {
+    console.log(`Project: ${memo.project}`);
+  }
+
+  console.log();
+  console.log(memo.body);
+}
+
+function parseMemoId(value: string): number {
+  const id = Number(value);
 
   if (!Number.isSafeInteger(id) || id < 1) {
     throw new Error("Memo ID must be a positive integer");

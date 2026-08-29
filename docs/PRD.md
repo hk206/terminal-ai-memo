@@ -196,7 +196,8 @@ AIエージェントは対象メモを読み、必要に応じて過去メモを
 | `memo -p` | Gitプロジェクト情報付きで複数行入力する |
 | `memo list` | 最近のメモを表示する |
 | `memo list --limit N` | 表示件数を指定する |
-| `memo show <id>` | 1件のメモを全文表示する |
+| `memo show` | 最近のメモをキー操作で選択し、全文表示する |
+| `memo show <id>` | IDを直接指定して1件のメモを全文表示する |
 | `memo search <query>` | 本文をローカル検索する |
 | `memo organize <id>` | 指定メモをAIで整理し、承認後に結果を保存する |
 | `memo organize` | 未整理の最新メモをAIで整理する |
@@ -317,6 +318,7 @@ macOSでの既定保存先は `~/Library/Application Support/terminal-ai-memo/me
 - [ ] `memo -p` でGitプロジェクト名を任意に記録できる
 - [ ] Git管理外で `memo -p` を使ってもメモ保存は成功する
 - [ ] `memo list` で新しい順にメモを確認できる
+- [ ] `memo show` で最近のメモをキー操作で選択できる
 - [ ] `memo show <id>` で改行を保った全文を確認できる
 - [ ] `memo search <query>` がAIなしで動作する
 - [ ] `memo organize <id>` で指定したメモをAIが処理できる
