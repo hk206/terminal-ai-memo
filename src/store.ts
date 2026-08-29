@@ -84,6 +84,32 @@ export class MemoStore {
     return row ? toMemo(row) : null;
   }
 
+  list(limit = 20): Memo[] {
+    if (!Number.isInteger(limit) || limit < 1) {
+      throw new Error("List limit must be a positive integer");
+    }
+
+    const rows = this.database
+      .query<MemoRow, [number]>(
+        `SELECT
+           id,
+           body,
+           created_at,
+           updated_at,
+           project,
+           project_root,
+           title,
+           summary,
+           status
+         FROM memos
+         ORDER BY id DESC
+         LIMIT ?`,
+      )
+      .all(limit);
+
+    return rows.map(toMemo);
+  }
+
   close(): void {
     this.database.close();
   }

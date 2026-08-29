@@ -5,6 +5,12 @@ import { MemoStore } from "./store";
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
+
+  if (args[0] === "list") {
+    listMemos(parseListLimit(args.slice(1)));
+    return;
+  }
+
   const body =
     args.length > 0 ? args.join(" ") : await readInteractiveMemoBody();
 
@@ -27,6 +33,55 @@ async function main(): Promise<void> {
   }
 }
 
+function listMemos(limit: number): void {
+  const store = new MemoStore();
+
+  try {
+    const memos = store.list(limit);
+
+    if (memos.length === 0) {
+      console.log("No memos found.");
+      return;
+    }
+
+    for (const memo of memos) {
+      console.log(`#${memo.id}  ${memo.createdAt}  [${memo.status}]`);
+      console.log(`  ${createPreview(memo.body)}`);
+    }
+  } finally {
+    store.close();
+  }
+}
+
+function parseListLimit(args: string[]): number {
+  if (args.length === 0) {
+    return 20;
+  }
+
+  if (args.length !== 2 || args[0] !== "--limit") {
+    throw new Error("Usage: memo list [--limit <number>]");
+  }
+
+  const limit = Number(args[1]);
+
+  if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
+    throw new Error("List limit must be an integer between 1 and 100");
+  }
+
+  return limit;
+}
+
+function createPreview(body: string): string {
+  const singleLineBody = body.replace(/\n/g, " / ");
+  const maxLength = 80;
+
+  if (singleLineBody.length <= maxLength) {
+    return singleLineBody;
+  }
+
+  return `${singleLineBody.slice(0, maxLength - 1)}…`;
+}
+
 async function readInteractiveMemoBody(): Promise<string | null> {
   console.log("New memo — submit with an empty line, cancel with Ctrl-C\n");
 
@@ -44,6 +99,6 @@ try {
   await main();
 } catch (error) {
   const message = error instanceof Error ? error.message : String(error);
-  console.error(`Failed to save memo: ${message}`);
+  console.error(`Error: ${message}`);
   process.exitCode = 1;
 }

@@ -27,4 +27,18 @@ describe("MemoStore", () => {
       "Memo body must not be empty",
     );
   });
+
+  test("lists newest memos first and respects the limit", () => {
+    store.create("first memo");
+    const second = store.create("second memo");
+    const third = store.create("third memo");
+
+    expect(store.list(2)).toEqual([third, second]);
+  });
+
+  test("rejects an invalid list limit", () => {
+    expect(() => store.list(0)).toThrow(
+      "List limit must be a positive integer",
+    );
+  });
 });
