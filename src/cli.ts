@@ -11,6 +11,11 @@ async function main(): Promise<void> {
     return;
   }
 
+  if (args[0] === "show") {
+    showMemo(parseMemoId(args.slice(1), "show"));
+    return;
+  }
+
   const body =
     args.length > 0 ? args.join(" ") : await readInteractiveMemoBody();
 
@@ -51,6 +56,47 @@ function listMemos(limit: number): void {
   } finally {
     store.close();
   }
+}
+
+function showMemo(id: number): void {
+  const store = new MemoStore();
+
+  try {
+    const memo = store.findById(id);
+
+    if (!memo) {
+      throw new Error(`Memo #${id} not found`);
+    }
+
+    console.log(`#${memo.id}  ${memo.createdAt}  [${memo.status}]`);
+
+    if (memo.title) {
+      console.log(`Title: ${memo.title}`);
+    }
+
+    if (memo.project) {
+      console.log(`Project: ${memo.project}`);
+    }
+
+    console.log();
+    console.log(memo.body);
+  } finally {
+    store.close();
+  }
+}
+
+function parseMemoId(args: string[], command: string): number {
+  if (args.length !== 1) {
+    throw new Error(`Usage: memo ${command} <id>`);
+  }
+
+  const id = Number(args[0]);
+
+  if (!Number.isSafeInteger(id) || id < 1) {
+    throw new Error("Memo ID must be a positive integer");
+  }
+
+  return id;
 }
 
 function parseListLimit(args: string[]): number {

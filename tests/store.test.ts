@@ -41,4 +41,8 @@ describe("MemoStore", () => {
       "List limit must be a positive integer",
     );
   });
+
+  test("returns null when a memo does not exist", () => {
+    expect(store.findById(999)).toBeNull();
+  });
 });
