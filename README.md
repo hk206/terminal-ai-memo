@@ -30,6 +30,15 @@ Save a one-line memo:
 bun run memo "Remember to inspect context compression"
 ```
 
+List, open, or search saved memos:
+
+```bash
+bun run memo list
+bun run memo show
+bun run memo show 1
+bun run memo search "context compression"
+```
+
 On macOS, memos are stored by default at:
 
 ```text

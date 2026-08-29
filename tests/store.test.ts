@@ -45,4 +45,25 @@ describe("MemoStore", () => {
   test("returns null when a memo does not exist", () => {
     expect(store.findById(999)).toBeNull();
   });
+
+  test("searches memo bodies by literal substring", () => {
+    const first = store.create("Investigate context compression");
+    store.create("Unrelated shopping list");
+    const third = store.create("More CONTEXT COMPRESSION notes");
+
+    expect(store.search("context compression")).toEqual([third, first]);
+  });
+
+  test("treats SQL wildcard characters as ordinary text", () => {
+    const percentMemo = store.create("Reach 100% coverage");
+    store.create("No percentage here");
+
+    expect(store.search("%")).toEqual([percentMemo]);
+  });
+
+  test("rejects an empty search query", () => {
+    expect(() => store.search("   ")).toThrow(
+      "Search query must not be empty",
+    );
+  });
 });

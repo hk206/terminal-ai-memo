@@ -18,6 +18,11 @@ async function main(): Promise<void> {
     return;
   }
 
+  if (args[0] === "search") {
+    searchMemos(parseSearchQuery(args.slice(1)));
+    return;
+  }
+
   const body =
     args.length > 0 ? args.join(" ") : await readInteractiveMemoBody();
 
@@ -45,18 +50,32 @@ function listMemos(limit: number): void {
 
   try {
     const memos = store.list(limit);
-
-    if (memos.length === 0) {
-      console.log("No memos found.");
-      return;
-    }
-
-    for (const memo of memos) {
-      console.log(`#${memo.id}  ${memo.createdAt}  [${memo.status}]`);
-      console.log(`  ${createPreview(memo.body)}`);
-    }
+    printMemoSummaries(memos, "No memos found.");
   } finally {
     store.close();
+  }
+}
+
+function searchMemos(query: string): void {
+  const store = new MemoStore();
+
+  try {
+    const memos = store.search(query);
+    printMemoSummaries(memos, `No memos found for "${query}".`);
+  } finally {
+    store.close();
+  }
+}
+
+function printMemoSummaries(memos: Memo[], emptyMessage: string): void {
+  if (memos.length === 0) {
+    console.log(emptyMessage);
+    return;
+  }
+
+  for (const memo of memos) {
+    console.log(`#${memo.id}  ${memo.createdAt}  [${memo.status}]`);
+    console.log(`  ${createPreview(memo.body)}`);
   }
 }
 
@@ -146,6 +165,16 @@ function parseListLimit(args: string[]): number {
   }
 
   return limit;
+}
+
+function parseSearchQuery(args: string[]): string {
+  const query = args.join(" ").trim();
+
+  if (query.length === 0) {
+    throw new Error("Usage: memo search <query>");
+  }
+
+  return query;
 }
 
 function createPreview(body: string): string {

@@ -110,6 +110,39 @@ export class MemoStore {
     return rows.map(toMemo);
   }
 
+  search(query: string, limit = 20): Memo[] {
+    const normalizedQuery = query.trim();
+
+    if (normalizedQuery.length === 0) {
+      throw new Error("Search query must not be empty");
+    }
+
+    if (!Number.isInteger(limit) || limit < 1) {
+      throw new Error("Search limit must be a positive integer");
+    }
+
+    const rows = this.database
+      .query<MemoRow, [string, number]>(
+        `SELECT
+           id,
+           body,
+           created_at,
+           updated_at,
+           project,
+           project_root,
+           title,
+           summary,
+           status
+         FROM memos
+         WHERE instr(lower(body), lower(?)) > 0
+         ORDER BY id DESC
+         LIMIT ?`,
+      )
+      .all(normalizedQuery, limit);
+
+    return rows.map(toMemo);
+  }
+
   close(): void {
     this.database.close();
   }
