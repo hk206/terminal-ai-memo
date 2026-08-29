@@ -74,7 +74,15 @@ function searchMemos(query: string): void {
 }
 
 async function askGemini(instruction: string): Promise<void> {
-  const assistant = createGeminiAssistant();
+  const assistant = createGeminiAssistant({
+    onRetry: ({ status, nextAttempt, maxAttempts, delayMilliseconds }) => {
+      const delaySeconds = (delayMilliseconds / 1_000).toFixed(1);
+      console.error(
+        `Gemini returned ${status}; retrying in ${delaySeconds}s ` +
+          `(${nextAttempt}/${maxAttempts})...`,
+      );
+    },
+  });
   const response = await assistant.ask(instruction);
   console.log(response);
 }

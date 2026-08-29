@@ -155,7 +155,7 @@ Notionへの作成は、エージェントが会話途中で自由に呼べるTo
 
 ### エージェント機能
 
-- MVPではGemini APIの`gemini-3.7-flash`を使用する
+- MVPではGemini APIの`gemini-3.6-flash`を使用する
 - LLMが必要なToolと引数を選択する
 - Tool結果を会話履歴へ戻し、複数ステップで調査する
 - 最大ステップ数を設け、無限ループを防ぐ
