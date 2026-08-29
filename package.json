@@ -1,0 +1,14 @@
+{
+  "name": "terminal-ai-memo",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "memo": "./src/cli.ts"
+  },
+  "scripts": {
+    "memo": "bun run src/cli.ts",
+    "test": "bun test",
+    "typecheck": "bunx tsc --noEmit"
+  }
+}
