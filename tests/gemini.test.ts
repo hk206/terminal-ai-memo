@@ -12,6 +12,61 @@ describe("GeminiAssistant", () => {
     );
   });
 
+  test("creates a structured Notion page draft", async () => {
+    const requests: GenerateRequest[] = [];
+    const assistant = new GeminiAssistant(async (request) => {
+      requests.push(request as GenerateRequest);
+      return {
+        text: JSON.stringify({
+          title: "Learning log",
+          body: "## Today\nLearned about MCP.",
+          sourceMemoIds: [1, 2],
+        }),
+      };
+    });
+
+    await expect(
+      assistant.createNotionDraft("今日のメモをまとめて"),
+    ).resolves.toEqual({
+      title: "Learning log",
+      body: "## Today\nLearned about MCP.",
+      sourceMemoIds: [1, 2],
+    });
+    expect(requests[0]?.config).toMatchObject({
+      responseMimeType: "application/json",
+      responseJsonSchema: {
+        type: "object",
+        required: ["title", "body", "sourceMemoIds"],
+      },
+    });
+  });
+
+  test("revises an existing Notion page draft", async () => {
+    let receivedInstruction = "";
+    const assistant = new GeminiAssistant(async (request) => {
+      const contents = request.contents as Array<{
+        parts: Array<{ text?: string }>;
+      }>;
+      receivedInstruction = contents[0]?.parts[0]?.text ?? "";
+      return {
+        text: JSON.stringify({
+          title: "Revised title",
+          body: "Revised body",
+          sourceMemoIds: [1],
+        }),
+      };
+    });
+
+    const revised = await assistant.reviseNotionDraft(
+      { title: "Old", body: "Old body", sourceMemoIds: [1] },
+      "TODOを具体的にして",
+    );
+
+    expect(revised.title).toBe("Revised title");
+    expect(receivedInstruction).toContain("TODOを具体的にして");
+    expect(receivedInstruction).toContain('"sourceMemoIds":[1]');
+  });
+
   test("passes the instruction and default model to Gemini", async () => {
     const requests: unknown[] = [];
     const assistant = new GeminiAssistant(async (request) => {
@@ -233,3 +288,7 @@ describe("GeminiAssistant", () => {
     );
   });
 });
+
+type GenerateRequest = {
+  config?: Record<string, unknown>;
+};

@@ -5,6 +5,11 @@ import type {
   GenerateContentParameters,
 } from "@google/genai";
 import type { AgentTool } from "./tools/types";
+import {
+  NOTION_PAGE_DRAFT_SCHEMA,
+  parseNotionPageDraft,
+  type NotionPageDraft,
+} from "./notion/draft";
 
 const DEFAULT_MODEL = "gemini-3.6-flash";
 const DEFAULT_MAX_STEPS = 6;
@@ -48,6 +53,45 @@ export class GeminiAssistant {
   ) {}
 
   async ask(instruction: string, options: AskOptions = {}): Promise<string> {
+    return this.runAgent(instruction, options, false);
+  }
+
+  async createNotionDraft(
+    instruction: string,
+    options: AskOptions = {},
+  ): Promise<NotionPageDraft> {
+    const response = await this.runAgent(instruction, options, true);
+    return parseNotionPageDraft(response);
+  }
+
+  async reviseNotionDraft(
+    draft: NotionPageDraft,
+    revisionInstruction: string,
+    options: Pick<AskOptions, "now" | "timeZone"> = {},
+  ): Promise<NotionPageDraft> {
+    if (revisionInstruction.trim().length === 0) {
+      throw new Error("Revision instruction must not be empty");
+    }
+
+    const instruction = [
+      "Revise the following Notion page draft according to the user's feedback.",
+      "Keep the source memo IDs unless the feedback makes a source irrelevant.",
+      "",
+      "Current draft:",
+      JSON.stringify(draft),
+      "",
+      "User feedback:",
+      revisionInstruction,
+    ].join("\n");
+    const response = await this.runAgent(instruction, options, true);
+    return parseNotionPageDraft(response);
+  }
+
+  private async runAgent(
+    instruction: string,
+    options: AskOptions,
+    structuredDraft: boolean,
+  ): Promise<string> {
     if (instruction.trim().length === 0) {
       throw new Error("Instruction must not be empty");
     }
@@ -66,7 +110,11 @@ export class GeminiAssistant {
         model: this.model,
         contents: history,
         config: {
-          systemInstruction: createSystemInstruction(options),
+          systemInstruction: createSystemInstruction(options, structuredDraft),
+          ...(structuredDraft && {
+            responseMimeType: "application/json",
+            responseJsonSchema: NOTION_PAGE_DRAFT_SCHEMA,
+          }),
           ...(tools.length > 0 && {
             tools: [
               {
@@ -180,12 +228,15 @@ export function createGeminiAssistant(
   }, model, options);
 }
 
-function createSystemInstruction(options: AskOptions): string {
+function createSystemInstruction(
+  options: AskOptions,
+  structuredDraft: boolean,
+): string {
   const now = options.now ?? new Date();
   const timeZone =
     options.timeZone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
 
-  return [
+  const instructions = [
     "You are the assistant for Terminal AI Memo.",
     "Reply in the same language as the user.",
     `Current datetime: ${now.toISOString()}`,
@@ -194,8 +245,18 @@ function createSystemInstruction(options: AskOptions): string {
     "listMemos and searchMemos return previews; use readMemo for the full text of relevant memos.",
     "Never claim to have read a memo unless a tool returned it.",
     "Mention the source memo IDs in the final answer.",
-    "Notion writing is not connected yet, so return a draft instead of claiming to create a page.",
-  ].join("\n");
+    "Never claim to create or update a Notion page; the CLI handles writes after user approval.",
+  ];
+
+  if (structuredDraft) {
+    instructions.push(
+      "Return a Notion page draft matching the requested JSON schema.",
+      "Write the body as readable Markdown and do not repeat the title in the body.",
+      "sourceMemoIds must contain only local memo IDs actually used as sources.",
+    );
+  }
+
+  return instructions.join("\n");
 }
 
 function createModelFunctionCallContent(functionCalls: FunctionCall[]): Content {
