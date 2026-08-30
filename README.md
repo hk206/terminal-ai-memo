@@ -2,7 +2,7 @@
 
 Terminal AI Memo is a local-first CLI inbox for capturing thoughts without leaving the terminal and organizing them with AI later.
 
-> This project is in early development. Local memo capture, Gemini-powered memo investigation, and Notion MCP authentication are implemented. Notion page creation is not connected yet.
+> This project is in early development. Local memo capture, Gemini-powered investigation, approval-gated revision, and Notion MCP page creation are implemented. Destination configuration and production hardening are still in progress.
 
 ## Requirements
 
@@ -84,4 +84,4 @@ bun test
 bun run typecheck
 ```
 
-See [docs/PRD.md](docs/PRD.md) for the product requirements and roadmap.
+See [docs/PRD.md](docs/PRD.md) for the product requirements and roadmap, and [docs/DETAILED_DESIGN.md](docs/DETAILED_DESIGN.md) for a file-by-file explanation of the current implementation.
