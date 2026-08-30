@@ -8,11 +8,17 @@ export type SecurityCommandRunner = (
   args: string[],
 ) => Promise<CommandResult>;
 
+export interface SecretStore {
+  get(): Promise<string | null>;
+  set(secret: string): Promise<void>;
+  delete(): Promise<void>;
+}
+
 const DEFAULT_SERVICE = "terminal-ai-memo.notion-mcp";
 const DEFAULT_ACCOUNT = "oauth";
 const ITEM_NOT_FOUND_EXIT_CODE = 44;
 
-export class KeychainSecretStore {
+export class KeychainSecretStore implements SecretStore {
   constructor(
     private readonly runSecurity: SecurityCommandRunner = runSecurityCommand,
     private readonly service = DEFAULT_SERVICE,
