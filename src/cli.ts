@@ -4,19 +4,14 @@ import { createInterface } from "node:readline";
 import { APP_VERSION, createHelpText } from "./appMetadata";
 import type { Memo } from "./core/memo";
 import { createNotionDraftAgent } from "./createNotionDraftAgent";
+import { createNotionPublisher } from "./createNotionPublisher";
 import { readMemoInput } from "./input";
-import {
-  formatNotionPageDraft,
-  type NotionPageDraft,
-} from "./notion/draft";
+import { formatNotionPageDraft } from "./notion/draft";
 import { parseDraftReviewAction } from "./notion/draftReview";
-import { KeychainSecretStore } from "./notion/keychainSecretStore";
 import {
-  connectToNotionMcpWithOAuth,
-  type NotionMcpConnection,
-} from "./notion/mcpClient";
-import { startOAuthCallbackServer } from "./notion/oauthCallbackServer";
-import { NotionOAuthProvider } from "./notion/oauthProvider";
+  withNotionConnection,
+  type NotionConnectionEvents,
+} from "./notion/withNotionConnection";
 import { openExternalUrl } from "./notion/openUrl";
 import { openTeletypeMemoCore } from "./openTeletypeMemoCore";
 import { selectOption } from "./select";
@@ -92,51 +87,21 @@ async function runNotionCommand(args: string[]): Promise<void> {
 }
 
 async function connectNotion(): Promise<void> {
-  await withNotionConnection(async (connection) => {
-    const [identity, tools] = await Promise.all([
-      connection.getWorkspaceIdentity(),
-      connection.listTools(),
-    ]);
+  await withNotionConnection(
+    async (connection) => {
+      const [identity, tools] = await Promise.all([
+        connection.getWorkspaceIdentity(),
+        connection.listTools(),
+      ]);
 
-    console.log(
-      `Connected to ${identity.workspace.name} as ${identity.user.name}.`,
-    );
-    console.log(`Available MCP tools: ${tools.length}`);
-    console.log(tools.map((tool) => tool.name).join(", "));
-  });
-}
-
-async function withNotionConnection<T>(
-  operation: (connection: NotionMcpConnection) => Promise<T>,
-): Promise<T> {
-  const callbackServer = await startOAuthCallbackServer();
-  const provider = new NotionOAuthProvider(
-    new KeychainSecretStore(),
-    callbackServer.callbackUrl,
-    async (authorizationUrl) => {
-      console.log("Opening Notion authorization in your browser...");
-
-      if (!(await openExternalUrl(authorizationUrl))) {
-        console.log("Could not open the browser. Open this URL manually:");
-        console.log(authorizationUrl.toString());
-      }
+      console.log(
+        `Connected to ${identity.workspace.name} as ${identity.user.name}.`,
+      );
+      console.log(`Available MCP tools: ${tools.length}`);
+      console.log(tools.map((tool) => tool.name).join(", "));
     },
+    createNotionConnectionEvents(),
   );
-  const authorizationCode = callbackServer.waitForCode(provider.state());
-  let connection;
-
-  console.log("Connecting to Notion MCP...");
-
-  try {
-    connection = await connectToNotionMcpWithOAuth(
-      provider,
-      () => authorizationCode,
-    );
-    return await operation(connection);
-  } finally {
-    await connection?.close();
-    await callbackServer.close();
-  }
 }
 
 function listMemos(limit: number): void {
@@ -172,6 +137,7 @@ async function askAgent(instruction: string): Promise<void> {
       );
     },
   });
+  const publisher = createNotionPublisher(createNotionConnectionEvents());
 
   try {
     const review = await agent.startReview(instruction, {
@@ -233,7 +199,8 @@ async function askAgent(instruction: string): Promise<void> {
       }
 
       const approved = review.approve();
-      await createNotionPage(approved.draft);
+      const page = await publisher.publish(approved);
+      console.log(`Created Notion page: ${page.url}`);
       return;
     }
   } finally {
@@ -241,12 +208,18 @@ async function askAgent(instruction: string): Promise<void> {
   }
 }
 
-async function createNotionPage(draft: NotionPageDraft): Promise<void> {
-  const page = await withNotionConnection((connection) =>
-    connection.createPage(draft),
-  );
+function createNotionConnectionEvents(): NotionConnectionEvents {
+  return {
+    onConnecting: () => console.log("Connecting to Notion MCP..."),
+    async onAuthorizationUrl(authorizationUrl) {
+      console.log("Opening Notion authorization in your browser...");
 
-  console.log(`Created Notion page: ${page.url}`);
+      if (!(await openExternalUrl(authorizationUrl))) {
+        console.log("Could not open the browser. Open this URL manually:");
+        console.log(authorizationUrl.toString());
+      }
+    },
+  };
 }
 
 function readTerminalLine(prompt: string): Promise<string | null> {

@@ -26,7 +26,7 @@ Teletype Memoは、次の4つの領域から構成される。
 3. **人間による承認UI**：下書きをプレビューし、作成・修正・キャンセルを選ぶ。
 4. **Notion連携**：OAuth認証済みのMCPクライアントとしてNotionページを作る。
 
-現在の実装はCLIをフロントエンドにしている。ローカルメモ操作、AI下書きの生成・修正、承認状態の遷移は共通Coreへ分離されている。CLIに残るのはターミナル表示・キー入力とNotion MCPへの書き込みであり、次は公開処理をCoreへ移す。CLIは廃止せず、開発・デバッグ・自動化用フロントエンドとして残す。
+現在の実装はCLIをフロントエンドにしている。ローカルメモ操作、AI下書きの生成・修正、承認状態の遷移、承認済み下書きの公開は共通Coreへ分離されている。CLIに残るのはターミナル表示、キー入力、OAuth URLを開くといったプレゼンテーション責務である。CLIは廃止せず、開発・デバッグ・自動化用フロントエンドとして残す。
 
 ```mermaid
 flowchart LR
@@ -46,7 +46,9 @@ flowchart LR
     Review -->|approve / revise / cancel| Session
     Session -->|revise| Agent
     Session -->|canceled| Stop["書き込まず終了"]
-    Session -->|approved| OAuth["OAuth + PKCE"]
+    Session -->|approved| Publisher["NotionPublisher"]
+    Publisher --> Connection["withNotionConnection"]
+    Connection --> OAuth["OAuth + PKCE"]
     OAuth --> Keychain["macOS Keychain"]
     OAuth --> MCP["Notion MCP Client"]
     MCP --> Notion["Hosted Notion MCP"]
@@ -60,6 +62,8 @@ flowchart LR
 - CLIはGeminiとMemo Toolsを直接組み立てず、`NotionDraftAgent`を使う。
 - `NotionDraftAgent`はGemini固有型ではなく`DraftModel` interfaceへ依存する。
 - `DraftReviewSession`はターミナル文字列を知らず、意味的なapprove/revise/cancelだけを扱う。
+- `NotionPublisher`は承認済み状態だけを受け取り、`NotionPageDestination`ポートへ公開を委譲する。
+- OAuth、callback server、MCP接続の生成と確実なcloseは`withNotionConnection()`へ集約する。
 - Geminiに渡すToolsはローカルメモの読み取り専用である。
 - Gemini自身にはNotion書き込みToolを渡さない。
 - Notion MCPへ接続するのは、ユーザーがプレビュー後に`y`を選んだ場合だけである。
@@ -110,8 +114,10 @@ flowchart LR
 | [src/core/teletypeMemoCore.ts](../src/core/teletypeMemoCore.ts) | フロントエンド非依存のローカルメモ用ユースケースAPI |
 | [src/core/notionDraftAgent.ts](../src/core/notionDraftAgent.ts) | 下書き生成・修正ユースケースと`DraftModel`ポート |
 | [src/core/draftReviewSession.ts](../src/core/draftReviewSession.ts) | reviewing/revising/approved/canceledの状態機械 |
+| [src/core/notionPublisher.ts](../src/core/notionPublisher.ts) | 承認済み下書きだけを外部公開するユースケースと出力先ポート |
 | [src/openTeletypeMemoCore.ts](../src/openTeletypeMemoCore.ts) | CoreとSQLite版`MemoStore`を組み立てるcomposition root |
 | [src/createNotionDraftAgent.ts](../src/createNotionDraftAgent.ts) | Agent、Gemini、Memo Toolsを組み立てるcomposition root |
+| [src/createNotionPublisher.ts](../src/createNotionPublisher.ts) | PublisherとHosted Notion接続adapterを組み立てるcomposition root |
 | [src/store.ts](../src/store.ts) | `MemoRepository`を実装するSQLite adapterとスキーマ |
 | [src/input.ts](../src/input.ts) | 空行で確定する複数行メモ入力 |
 | [src/select.ts](../src/select.ts) | `memo show`のTTYキー選択UI |
@@ -125,6 +131,7 @@ flowchart LR
 | [src/notion/oauthCallbackServer.ts](../src/notion/oauthCallbackServer.ts) | localhost OAuthコールバック受付とstate検証 |
 | [src/notion/openUrl.ts](../src/notion/openUrl.ts) | macOSブラウザでOAuth URLを開く |
 | [src/notion/mcpClient.ts](../src/notion/mcpClient.ts) | Notion MCP接続、認証完了、Tool実行、応答検証 |
+| [src/notion/withNotionConnection.ts](../src/notion/withNotionConnection.ts) | callback server、OAuth、MCP接続のライフサイクル管理 |
 
 ### 4.3 テストコード
 
@@ -134,6 +141,8 @@ flowchart LR
 | [tests/teletypeMemoCore.test.ts](../tests/teletypeMemoCore.test.ts) | Coreの追記、取得、一覧、検索、日付範囲 |
 | [tests/notionDraftAgent.test.ts](../tests/notionDraftAgent.test.ts) | 下書きAgentのTool注入、イベント転送、修正 |
 | [tests/draftReviewSession.test.ts](../tests/draftReviewSession.test.ts) | 承認・取消・修正中・失敗復旧・終端状態 |
+| [tests/notionPublisher.test.ts](../tests/notionPublisher.test.ts) | 承認済み下書きの公開と未承認状態の拒否 |
+| [tests/withNotionConnection.test.ts](../tests/withNotionConnection.test.ts) | 接続イベント、成功・失敗時のリソース解放 |
 | [tests/appMetadata.test.ts](../tests/appMetadata.test.ts) | 表示名と内部IDの分離、help本文 |
 | [tests/input.test.ts](../tests/input.test.ts) | 複数行入力、空行確定、EOF |
 | [tests/select.test.ts](../tests/select.test.ts) | 選択位置の移動と循環 |
@@ -247,10 +256,12 @@ sequenceDiagram
     participant C as CLI
     participant A as NotionDraftAgent
     participant R as DraftReviewSession
+    participant P as NotionPublisher
     participant G as GeminiAssistant
     participant T as Memo Tools
     participant Core as TeletypeMemoCore
     participant S as MemoStore
+    participant W as withNotionConnection
     participant M as Notion MCP
 
     U->>C: memo ask instruction
@@ -288,9 +299,13 @@ sequenceDiagram
     else y
         C->>R: approve()
         R-->>C: approved(draft)
-        C->>M: OAuth済み接続
-        C->>M: notion-create-pages
-        M-->>C: page id / URL
+        C->>P: publish(approved)
+        P->>W: createPage(draft)
+        W->>M: OAuth済み接続
+        W->>M: notion-create-pages
+        M-->>W: page id / URL
+        W-->>P: page id / URL
+        P-->>C: page id / URL
         C-->>U: Created Notion page: URL
     end
 ```
@@ -615,6 +630,14 @@ Geminiには、不要にならない限り既存のsourceMemoIdsを維持する�
 
 `approve()`は承認済み下書きを返すが、自分ではNotionへ書き込まない。外部書き込みは次段階の公開ユースケースへ渡す。
 
+### 9.4 NotionPublisher
+
+`NotionPublisher`は公開ユースケースのCoreである。入力には`ApprovedDraftReviewState`を要求し、内部の下書きを`NotionPageDestination.createPage()`へ渡す。Google SDK、MCP SDK、OAuth、ターミナル表示を知らない。
+
+TypeScriptの型だけでなく実行時にも`status === "approved"`を検証する。JavaScriptから呼ばれた場合や不正な型アサーションがあっても、未承認下書きを外部へ送らないためである。
+
+`createNotionPublisher()`は本番用composition rootであり、出力先ポートをHosted Notion MCP接続adapterで満たす。インスタンスを作るだけでは接続せず、`publish()`が呼ばれた時点で初めてOAuth/MCP処理を開始する。そのため、レビューでcancelした場合はNotionへ接続しない。
+
 ## 10. OAuthと秘密情報
 
 ### 10.1 OAuth全体フロー
@@ -623,34 +646,42 @@ Geminiには、不要にならない限り既存のsourceMemoIdsを維持する�
 sequenceDiagram
     actor U as User
     participant C as CLI
+    participant W as withNotionConnection
     participant L as Local Callback Server
     participant P as OAuthProvider
     participant K as Keychain
     participant SDK as MCP SDK
     participant N as Notion
 
-    C->>L: 127.0.0.1:43119で待受
-    C->>P: callback URLとKeychainを注入
+    C->>W: operationとUI eventsを渡す
+    W->>L: 127.0.0.1:43119で待受
+    W->>P: callback URLとKeychainを注入
     P->>K: 既存client/tokensを取得
-    C->>SDK: connect(authProvider)
+    W->>SDK: connect(authProvider)
     alt 有効なトークンあり
         SDK->>N: MCP initialize
     else 認証が必要
         SDK->>P: PKCE verifier保存
         SDK->>P: authorization URL通知
-        P-->>C: URL
+        P-->>W: URL
+        W-->>C: onAuthorizationUrl(URL)
         C->>U: ブラウザを開く
         U->>N: ワークスペースを許可
         N->>L: code + state
         L->>L: state一致を検証
-        L-->>C: authorization code
-        C->>SDK: finishAuth(code)
+        L-->>W: authorization code
+        W->>SDK: finishAuth(code)
         SDK->>N: codeをtokensへ交換
         SDK->>P: tokens保存
         P->>K: JSONを保存
-        C->>SDK: 認証済みで再接続
+        W->>SDK: 認証済みで再接続
     end
+    W->>SDK: operation(connection)
+    W->>SDK: close()
+    W->>L: close()
 ```
+
+`withNotionConnection()`がcallback server、OAuth Provider、MCP connectionの生成と破棄を所有する。operation成功時だけでなく、接続失敗やconnectionのclose失敗でもcallback serverを`finally`で閉じる。CLIは`onConnecting`と`onAuthorizationUrl`イベントを表示・ブラウザ起動へ変換するだけで、KeychainやMCP SDKを直接組み立てない。
 
 ### 10.2 localhostコールバック
 
@@ -826,13 +857,14 @@ Notion MCPのTool結果はMCP content blockとして返る。現在は次を前�
 
 ### 14.2 テストが保証する範囲
 
-現在の74テストは、次を保証する。
+現在の79テストは、次を保証する。
 
 | 領域 | 主な保証 |
 | --- | --- |
 | Core | 追記、ID取得、一覧、検索、日付範囲、SQLite adapterとの組み立て |
 | Draft Agent | Memo Toolsの注入、Toolイベント転送、モデルポート経由の修正 |
 | Review Session | 承認、取消、修正中の競合拒否、修正成功、失敗時の復旧、終端状態 |
+| Publisher | 承認済み下書きの出力先への委譲、未承認状態の実行時拒否 |
 | Store | 改行保持、空拒否、新着順、上限、不存在、リテラル検索、日付範囲 |
 | Input | 空行確定、先頭空行、EOF |
 | Select | 上下移動と循環 |
@@ -845,6 +877,7 @@ Notion MCPのTool結果はMCP content blockとして返る。現在は次を前�
 | Callback | 正常code、state不一致、OAuth拒否、無関係URL |
 | Browser | open成功・失敗 |
 | MCP | Tool一覧、workspace identity、private page引数、close、空token拒否 |
+| Connection Lifecycle | UIイベント転送、成功時のclose、接続失敗時とclose失敗時のcallback server解放 |
 
 ### 14.3 実環境で確認済みの範囲
 
@@ -857,6 +890,7 @@ Notion MCPのTool結果はMCP content blockとして返る。現在は次を前�
 - `y`を選んだ後だけNotion MCPへ接続し、Privateページを1件作成してURLを表示する。
 - 応答しないGeminiリクエストに上限がない問題をE2E中に発見し、60秒のSDKタイムアウト設定と回帰テストを追加した。
 - `NotionDraftAgent`抽出後も、合成メモで`searchMemos`、`listMemos`、`readMemo`、プレビュー、`n`による未作成終了を再確認した。
+- `NotionPublisher`抽出後、Geminiを介さない承認済み合成下書きをCoreへ渡し、Hosted Notion MCPにPrivateページを1件作成できることを再確認した。
 
 この確認では`GEMINI_MODEL=gemini-3.6-flash`をコマンド単位で明示した。ローカル設定で選ばれていた3.7 Flashは確認時に504を返したため、モデル名の上書きが実際の挙動へ反映されることも確認できた。
 
@@ -914,6 +948,7 @@ NotionのAPIキーやOAuthトークンを環境変数へ置く設計ではない
 - `sourceMemoIds`は正の整数として検証するが、実際にその実行で`readMemo`したIDだけかは照合していない。
 - 参照メモIDはターミナルに表示するが、Notion本文へ自動追記しない。
 - `memo notion connect`のTool一覧37件は通常表示として長い。
+- Notion作成要求の送信後に応答だけ失われた場合の冪等性キーがなく、利用者が再実行すると重複ページになる可能性がある。
 
 ### 16.2 技術上の制約
 
@@ -942,12 +977,13 @@ NotionのAPIキーやOAuthトークンを環境変数へ置く設計ではない
 | メモ項目・SQLiteクエリ追加 | `src/store.ts`、DB migration、Storeテスト |
 | AI下書きユースケース変更 | `src/core/notionDraftAgent.ts`、`src/createNotionDraftAgent.ts`、Agentテスト |
 | 承認状態遷移変更 | `src/core/draftReviewSession.ts`、`src/notion/draftReview.ts`、Sessionテスト |
+| 公開条件・公開結果の変更 | `src/core/notionPublisher.ts`、`src/createNotionPublisher.ts`、Publisherテスト |
 | 新しいローカルAI Tool | `src/tools/memoTools.ts`または新Toolファイル、`src/tools/types.ts` |
 | Agentの判断ルール変更 | `src/gemini.ts`のsystem instruction |
 | 下書き項目追加 | `src/notion/draft.ts`、Gemini schema、MCP引数、テスト |
 | 承認操作追加 | `src/notion/draftReview.ts`、`src/cli.ts` |
-| Notion保存先設定 | `src/notion/mcpClient.ts`、設定保存層、CLI |
-| OAuth仕様変更 | `oauthProvider.ts`、`oauthCallbackServer.ts`、Keychain層 |
+| Notion保存先設定 | `src/core/notionPublisher.ts`、`src/notion/mcpClient.ts`、設定保存層 |
+| OAuth仕様・接続ライフサイクル変更 | `withNotionConnection.ts`、`oauthProvider.ts`、`oauthCallbackServer.ts`、Keychain層 |
 | Linux/Windows対応 | Keychainと`open`をOS別アダプターへ分離 |
 
 ## 18. 学習するときの推奨読解順
@@ -957,12 +993,13 @@ NotionのAPIキーやOAuthトークンを環境変数へ置く設計ではない
 3. `src/openTeletypeMemoCore.ts`、`src/store.ts`、`src/input.ts`でSQLite adapterとCLI入力を見る。
 4. `src/core/notionDraftAgent.ts`と`src/createNotionDraftAgent.ts`でモデルポートと組み立てを見る。
 5. `src/core/draftReviewSession.ts`でUI非依存の承認状態機械を見る。
-6. `src/tools/types.ts`と`src/tools/memoTools.ts`でAI Toolsも同じCoreを使うことを確認する。
-7. `src/gemini.ts`の`runAgent()`でエージェントループを追う。
-8. `src/notion/draft.ts`と`draftReview.ts`で構造化出力とCLI入力解釈を見る。
-9. `oauthCallbackServer.ts`、`oauthProvider.ts`、`keychainSecretStore.ts`でOAuthを追う。
-10. `mcpClient.ts`で認証後のMCP Tool実行を見る。
-11. 対応するテストを読み、依存をFakeへ置き換える方法を確認する。
+6. `src/core/notionPublisher.ts`と`src/createNotionPublisher.ts`で承認済み公開の境界を見る。
+7. `src/tools/types.ts`と`src/tools/memoTools.ts`でAI Toolsも同じCoreを使うことを確認する。
+8. `src/gemini.ts`の`runAgent()`でエージェントループを追う。
+9. `src/notion/draft.ts`と`draftReview.ts`で構造化出力とCLI入力解釈を見る。
+10. `withNotionConnection.ts`、`oauthCallbackServer.ts`、`oauthProvider.ts`、`keychainSecretStore.ts`で接続ライフサイクルとOAuthを追う。
+11. `mcpClient.ts`で認証後のMCP Tool実行を見る。
+12. 対応するテストを読み、依存をFakeへ置き換える方法を確認する。
 
 特に学習上の中心は、次の2本である。
 
