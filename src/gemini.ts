@@ -14,6 +14,7 @@ import {
 
 const DEFAULT_MODEL = "gemini-3.6-flash";
 const DEFAULT_MAX_STEPS = 6;
+const DEFAULT_REQUEST_TIMEOUT_MILLISECONDS = 60_000;
 const RETRYABLE_STATUS_CODES = new Set([408, 429, 500, 502, 503, 504]);
 
 interface ModelResponse {
@@ -28,6 +29,7 @@ type GenerateContent = (
 
 interface RetryOptions {
   maxAttempts?: number;
+  requestTimeoutMilliseconds?: number;
   sleep?: (milliseconds: number) => Promise<void>;
   random?: () => number;
   onRetry?: (details: {
@@ -111,6 +113,11 @@ export class GeminiAssistant {
         model: this.model,
         contents: history,
         config: {
+          httpOptions: {
+            timeout:
+              this.retryOptions.requestTimeoutMilliseconds ??
+              DEFAULT_REQUEST_TIMEOUT_MILLISECONDS,
+          },
           systemInstruction: createSystemInstruction(options, structuredDraft),
           ...(structuredDraft && {
             responseMimeType: "application/json",
@@ -330,6 +337,13 @@ function getErrorStatus(error: unknown): number | null {
 function createHelpfulError(error: unknown, model: string): Error {
   const status = getErrorStatus(error);
 
+  if (isRequestTimeoutError(error)) {
+    return new Error(
+      "Gemini request timed out. Check your network and try again later.",
+      { cause: error },
+    );
+  }
+
   if (status === 503) {
     return new Error(
       `Gemini model "${model}" is temporarily unavailable after retrying. ` +
@@ -346,6 +360,15 @@ function createHelpfulError(error: unknown, model: string): Error {
   }
 
   return error instanceof Error ? error : new Error(String(error));
+}
+
+function isRequestTimeoutError(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    (error.name === "APIConnectionTimeoutError" ||
+      error.name === "RequestTimeoutError" ||
+      error.name === "TimeoutError")
+  );
 }
 
 function wait(milliseconds: number): Promise<void> {

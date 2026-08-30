@@ -100,7 +100,7 @@ flowchart LR
 | [src/store.ts](../src/store.ts) | SQLiteスキーマとメモCRUDの読み書き |
 | [src/input.ts](../src/input.ts) | 空行で確定する複数行メモ入力 |
 | [src/select.ts](../src/select.ts) | `memo show`のTTYキー選択UI |
-| [src/gemini.ts](../src/gemini.ts) | Gemini接続、Toolループ、構造化下書き、修正、リトライ |
+| [src/gemini.ts](../src/gemini.ts) | Gemini接続、Toolループ、構造化下書き、修正、タイムアウト、リトライ |
 | [src/tools/types.ts](../src/tools/types.ts) | LLMへ公開するToolの共通インターフェース |
 | [src/tools/memoTools.ts](../src/tools/memoTools.ts) | `listMemos`、`searchMemos`、`readMemo`の実装 |
 | [src/notion/draft.ts](../src/notion/draft.ts) | Notion下書き型、JSON Schema、実行時検証、表示整形 |
@@ -482,6 +482,8 @@ type NotionPageDraft = {
 
 ### 8.8 リトライ
 
+各Generate Contentリクエストの`config.httpOptions.timeout`には60,000msを指定する。Geminiまたはネットワークから応答が戻らない場合に、CLIが無期限に待ち続けることを防ぐためである。SDKがタイムアウト例外を返した場合は、利用者向けの短いメッセージへ変換する。
+
 次のHTTPステータスだけを一時エラーとして再試行する。
 
 ```text
@@ -716,6 +718,7 @@ Notion MCPのTool結果はMCP content blockとして返る。現在は次を前�
 | 存在しないID | `Memo #N not found` |
 | 非TTYで`memo show` | 対話選択不可としてエラー |
 | Gemini APIキーなし | `.env`設定方法を表示 |
+| Gemini通信タイムアウト | 60秒のリクエスト上限後に利用者向けメッセージ |
 | Gemini 503/429 | リトライ後に利用者向けメッセージ |
 | Tool引数不正 | Geminiへerror responseを返す |
 | Agentが6ステップ超過 | ループ停止エラー |
@@ -737,7 +740,7 @@ Notion MCPのTool結果はMCP content blockとして返る。現在は次を前�
 
 ### 14.2 テストが保証する範囲
 
-現在の63テストは、次を保証する。
+現在の65テストは、次を保証する。
 
 | 領域 | 主な保証 |
 | --- | --- |
@@ -745,7 +748,7 @@ Notion MCPのTool結果はMCP content blockとして返る。現在は次を前�
 | Input | 空行確定、先頭空行、EOF |
 | Select | 上下移動と循環 |
 | Memo Tools | 要約、検索、全文、不正ID |
-| Gemini | テキスト、構造化下書き、修正、Tool往復、Toolエラー、上限、リトライ |
+| Gemini | テキスト、構造化下書き、修正、Tool往復、Toolエラー、上限、タイムアウト設定・表示、リトライ |
 | Draft | JSON parse、正規化、不正ID、表示 |
 | Review | create/revise/cancel/invalid |
 | Keychain | 取得、未登録、保存、空拒否、冪等削除 |
@@ -754,10 +757,21 @@ Notion MCPのTool結果はMCP content blockとして返る。現在は次を前�
 | Browser | open成功・失敗 |
 | MCP | Tool一覧、workspace identity、private page引数、close、空token拒否 |
 
-### 14.3 テストしていない範囲
+### 14.3 実環境で確認済みの範囲
 
-- 実Gemini APIとFunction Calling・構造化出力を組み合わせたE2E
-- `y`を選び、実Notionページを作るE2E
+2026-08-30に、ユーザーの通常DBではなく一時SQLiteへ保存した合成メモ2件を使い、次を手動E2E確認した。
+
+- Gemini 3.6 Flashが`listMemos`を呼び、必要な`readMemo`を2回呼んで構造化下書きを返す。
+- プレビューで`n`を選ぶと、Notion MCPへ接続せず何も作成しない。
+- `r`で一行の修正指示を送り、チェックリスト形式へ直した下書きを再表示できる。
+- 再表示後の`n`でもNotionへ何も作成しない。
+- `y`を選んだ後だけNotion MCPへ接続し、Privateページを1件作成してURLを表示する。
+- 応答しないGeminiリクエストに上限がない問題をE2E中に発見し、60秒のSDKタイムアウト設定と回帰テストを追加した。
+
+この確認では`GEMINI_MODEL=gemini-3.6-flash`をコマンド単位で明示した。ローカル設定で選ばれていた3.7 Flashは確認時に504を返したため、モデル名の上書きが実際の挙動へ反映されることも確認できた。
+
+### 14.4 自動テストしていない範囲
+
 - CLI全体を子プロセスとして起動した対話テスト
 - Keychainの実OS権限ダイアログ
 - アクセストークン期限切れからの実refresh

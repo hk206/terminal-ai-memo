@@ -79,6 +79,9 @@ describe("GeminiAssistant", () => {
     expect(requests).toHaveLength(1);
     expect(requests[0]).toMatchObject({
       model: "gemini-3.6-flash",
+      config: {
+        httpOptions: { timeout: 60_000 },
+      },
       contents: [
         {
           role: "user",
@@ -86,6 +89,22 @@ describe("GeminiAssistant", () => {
         },
       ],
     });
+  });
+
+  test("allows the request timeout to be configured", async () => {
+    const requests: GenerateRequest[] = [];
+    const assistant = new GeminiAssistant(
+      async (request) => {
+        requests.push(request as GenerateRequest);
+        return { text: "ok" };
+      },
+      "gemini-3.6-flash",
+      { requestTimeoutMilliseconds: 1_234 },
+    );
+
+    await assistant.ask("Say hello");
+
+    expect(requests[0]?.config?.httpOptions).toEqual({ timeout: 1_234 });
   });
 
   test("executes a requested tool and sends its result back to Gemini", async () => {
@@ -272,6 +291,18 @@ describe("GeminiAssistant", () => {
     );
   });
 
+  test("returns a helpful message after a request timeout", async () => {
+    const assistant = new GeminiAssistant(async () => {
+      const error = new Error("Request timed out");
+      error.name = "APIConnectionTimeoutError";
+      throw error;
+    });
+
+    await expect(assistant.ask("Say hello")).rejects.toThrow(
+      "Gemini request timed out. Check your network and try again later.",
+    );
+  });
+
   test("rejects an empty instruction", async () => {
     const assistant = new GeminiAssistant(async () => ({ text: "unused" }));
 
@@ -290,5 +321,8 @@ describe("GeminiAssistant", () => {
 });
 
 type GenerateRequest = {
-  config?: Record<string, unknown>;
+  config?: {
+    httpOptions?: { timeout?: number };
+    [key: string]: unknown;
+  };
 };
