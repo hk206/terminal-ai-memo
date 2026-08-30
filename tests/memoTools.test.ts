@@ -1,20 +1,21 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { MemoStore } from "../src/store";
+import type { TeletypeMemoCore } from "../src/core/teletypeMemoCore";
+import { openTeletypeMemoCore } from "../src/openTeletypeMemoCore";
 import { createMemoTools } from "../src/tools/memoTools";
 
 describe("memo tools", () => {
-  let store: MemoStore;
+  let core: TeletypeMemoCore;
 
   beforeEach(() => {
-    store = new MemoStore(":memory:");
+    core = openTeletypeMemoCore({ databasePath: ":memory:" });
   });
 
   afterEach(() => {
-    store.close();
+    core.close();
   });
 
   test("listMemos returns summaries instead of full long bodies", async () => {
-    store.create("a".repeat(250));
+    core.captureMemo("a".repeat(250));
     const tool = findTool("listMemos");
 
     const result = JSON.parse(await tool.execute({ limit: 5 }));
@@ -26,8 +27,8 @@ describe("memo tools", () => {
   });
 
   test("searchMemos finds topic matches", async () => {
-    store.create("コンテキスト圧縮を試す");
-    store.create("買い物メモ");
+    core.captureMemo("コンテキスト圧縮を試す");
+    core.captureMemo("買い物メモ");
     const tool = findTool("searchMemos");
 
     const result = JSON.parse(await tool.execute({ query: "圧縮" }));
@@ -37,7 +38,7 @@ describe("memo tools", () => {
   });
 
   test("readMemo returns the full original memo", async () => {
-    const memo = store.create("first line\nsecond line");
+    const memo = core.captureMemo("first line\nsecond line");
     const tool = findTool("readMemo");
 
     const result = JSON.parse(await tool.execute({ id: memo.id }));
@@ -54,7 +55,7 @@ describe("memo tools", () => {
   });
 
   function findTool(name: string) {
-    const tool = createMemoTools(store).find((candidate) => candidate.name === name);
+    const tool = createMemoTools(core).find((candidate) => candidate.name === name);
 
     if (!tool) {
       throw new Error(`Tool ${name} not found`);

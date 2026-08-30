@@ -26,18 +26,19 @@ Teletype Memoは、次の4つの領域から構成される。
 3. **人間による承認UI**：下書きをプレビューし、作成・修正・キャンセルを選ぶ。
 4. **Notion連携**：OAuth認証済みのMCPクライアントとしてNotionページを作る。
 
-現在の実装はCLIをフロントエンドにしているが、将来は保存・AI・MCP処理を共通Coreとして抽出し、同じCoreをデスクトップのグローバルショートカット入力UIから利用する。CLIは廃止せず、開発・デバッグ・自動化用フロントエンドとして残す。
+現在の実装はCLIをフロントエンドにしている。ローカルメモの保存・取得・一覧・検索はすでに共通Coreへ分離され、CLIとAI Toolsが同じAPIを利用する。AI下書き・承認・MCP処理はまだCLIが調整しており、今後Coreへ移す。CLIは廃止せず、開発・デバッグ・自動化用フロントエンドとして残す。
 
 ```mermaid
 flowchart LR
     User["ユーザー"] --> CLI["src/cli.ts\nコマンド振り分け"]
     CLI --> Input["入力UI"]
-    CLI --> Store["MemoStore"]
+    CLI --> Core["TeletypeMemoCore"]
+    Core --> Store["MemoStore\nSQLite adapter"]
     Store --> SQLite[("SQLite")]
 
     CLI --> Gemini["GeminiAssistant"]
     Gemini --> Tools["Memo Tools"]
-    Tools --> Store
+    Tools --> Core
     Gemini --> Draft["NotionPageDraft"]
     Draft --> Review["プレビューと承認"]
     Review -->|revise| Gemini
@@ -51,6 +52,8 @@ flowchart LR
 ### 2.1 重要な設計境界
 
 - メモ保存はGeminiやNotionへ依存しない。
+- CLIとAI Toolsは`MemoStore`を直接使わず、共通Coreだけを使う。
+- Core本体はSQLite実装ではなく`MemoRepository` interfaceへ依存する。
 - Geminiに渡すToolsはローカルメモの読み取り専用である。
 - Gemini自身にはNotion書き込みToolを渡さない。
 - Notion MCPへ接続するのは、ユーザーがプレビュー後に`y`を選んだ場合だけである。
@@ -97,7 +100,10 @@ flowchart LR
 | [src/cli.ts](../src/cli.ts) | 唯一のCLIエントリーポイント。コマンド振り分けとユースケース調整 |
 | [src/appMetadata.ts](../src/appMetadata.ts) | 表示名、互換性用内部ID、バージョン、help本文 |
 | [src/config.ts](../src/config.ts) | SQLiteファイルの保存パス決定 |
-| [src/store.ts](../src/store.ts) | SQLiteスキーマとメモCRUDの読み書き |
+| [src/core/memo.ts](../src/core/memo.ts) | Memoドメイン型と永続化用`MemoRepository`ポート |
+| [src/core/teletypeMemoCore.ts](../src/core/teletypeMemoCore.ts) | フロントエンド非依存のローカルメモ用ユースケースAPI |
+| [src/openTeletypeMemoCore.ts](../src/openTeletypeMemoCore.ts) | CoreとSQLite版`MemoStore`を組み立てるcomposition root |
+| [src/store.ts](../src/store.ts) | `MemoRepository`を実装するSQLite adapterとスキーマ |
 | [src/input.ts](../src/input.ts) | 空行で確定する複数行メモ入力 |
 | [src/select.ts](../src/select.ts) | `memo show`のTTYキー選択UI |
 | [src/gemini.ts](../src/gemini.ts) | Gemini接続、Toolループ、構造化下書き、修正、タイムアウト、リトライ |
@@ -116,6 +122,7 @@ flowchart LR
 | ファイル | 対象 |
 | --- | --- |
 | [tests/store.test.ts](../tests/store.test.ts) | SQLite保存、取得、一覧、検索、日付範囲、入力拒否 |
+| [tests/teletypeMemoCore.test.ts](../tests/teletypeMemoCore.test.ts) | Coreの追記、取得、一覧、検索、日付範囲 |
 | [tests/appMetadata.test.ts](../tests/appMetadata.test.ts) | 表示名と内部IDの分離、help本文 |
 | [tests/input.test.ts](../tests/input.test.ts) | 複数行入力、空行確定、EOF |
 | [tests/select.test.ts](../tests/select.test.ts) | 選択位置の移動と循環 |
@@ -192,7 +199,7 @@ PRDに記載されていても、次は`src/cli.ts`に未実装である。
 list → show → search → ask → notion → 通常メモ保存
 ```
 
-各ユースケースは、自分で`MemoStore`を生成し、`try/finally`で必ず`close()`する。CLIは依存性注入コンテナを持たず、エントリーポイントで具体クラスを組み立てる単純な構造である。
+ローカルメモを使うユースケースは`openTeletypeMemoCore()`でCoreを開き、`try/finally`で必ず`close()`する。CLIは`MemoStore`を直接importしない。具体的なSQLite adapterの組み立ては`src/openTeletypeMemoCore.ts`へ集約する。
 
 ### 6.3 メモ保存フロー
 
@@ -201,6 +208,7 @@ sequenceDiagram
     actor U as User
     participant C as cli.ts
     participant I as input.ts
+    participant Core as TeletypeMemoCore
     participant S as MemoStore
     participant D as SQLite
 
@@ -210,12 +218,14 @@ sequenceDiagram
         I-->>C: submitted(body) / canceled
     end
     C->>C: 空文字検証
-    C->>S: create(body)
+    C->>Core: captureMemo(body)
+    Core->>S: create(body)
     S->>D: INSERT
     S->>D: SELECT inserted id
-    S-->>C: Memo
+    S-->>Core: Memo
+    Core-->>C: Memo
     C-->>U: Saved memo #ID
-    C->>S: close()
+    C->>Core: close()
 ```
 
 ### 6.4 `memo ask`フロー
@@ -226,6 +236,7 @@ sequenceDiagram
     participant C as CLI
     participant G as GeminiAssistant
     participant T as Memo Tools
+    participant Core as TeletypeMemoCore
     participant S as MemoStore
     participant M as Notion MCP
 
@@ -235,8 +246,10 @@ sequenceDiagram
         G->>G: Gemini Generate Content
         alt Tool callあり
             G->>T: execute(args)
-            T->>S: list/search/read
-            S-->>T: Memo data
+            T->>Core: list/search/get
+            Core->>S: listByDate/search/findById
+            S-->>Core: Memo data
+            Core-->>T: Memo data
             T-->>G: JSON result
         else 最終回答
             G-->>C: NotionPageDraft
@@ -272,9 +285,26 @@ sequenceDiagram
 
 修正時はMemo Toolsを再度渡さない。現在の下書きと参照IDをJSONでGeminiへ渡し、ユーザーの修正指示だけを適用する。これにより、メモの再検索を避ける。
 
-## 7. ローカルメモ層
+## 7. 共通Coreとローカルメモ層
 
-### 7.1 DBパス決定
+### 7.1 Coreの境界
+
+`TeletypeMemoCore`は、CLIや将来のデスクトップUIが使うフロントエンド非依存APIである。
+
+| Coreメソッド | 用途 |
+| --- | --- |
+| `captureMemo(body)` | 原文を新しいrawメモとして追記する |
+| `getMemo(id)` | IDで1件取得する |
+| `listMemos(limit)` | 新しい順に一覧取得する |
+| `listMemosByDate(options)` | ISO日時の半開区間で取得する |
+| `searchMemos(query, limit)` | 本文をリテラル部分一致検索する |
+| `close()` | 内部Repositoryのリソースを閉じる |
+
+公開APIには更新・削除メソッドを置かない。これは「原文は追記専用」というプロダクト制約をフロントエンド境界にも反映するためである。
+
+Coreは`MemoRepository` interfaceだけを受け取り、SQLiteを知らない。`openTeletypeMemoCore()`が`MemoStore`を注入するため、将来別の永続化adapterやFakeへ差し替えられる。
+
+### 7.2 DBパス決定
 
 `src/config.ts`の`getDatabasePath()`は次の優先順位でパスを決める。
 
@@ -285,7 +315,7 @@ sequenceDiagram
 
 `MemoStore`はインメモリDBでない限り、親ディレクトリを再帰的に作る。
 
-### 7.2 SQLiteスキーマ
+### 7.3 SQLiteスキーマ
 
 ```sql
 CREATE TABLE memos (
@@ -304,9 +334,9 @@ CREATE TABLE memos (
 
 `PRAGMA journal_mode = WAL`を設定する。WAL用の`*.db-wal`と`*.db-shm`はGit対象外である。
 
-### 7.3 TypeScriptモデル
+### 7.4 TypeScriptモデル
 
-`MemoRow`はSQLiteのsnake_case、公開する`Memo`はcamelCaseを使う。`toMemo()`が境界で変換する。
+公開する`Memo`と`MemoRepository`は`src/core/memo.ts`に置く。`MemoRow`はSQLite adapter内部のsnake_case、公開する`Memo`はcamelCaseを使い、`toMemo()`が境界で変換する。
 
 | フィールド | 現在の用途 |
 | --- | --- |
@@ -318,7 +348,7 @@ CREATE TABLE memos (
 | `project`、`projectRoot` | 将来のプロジェクト関連付け用。現状は未使用 |
 | `title`、`summary` | 将来のAI整理結果用。現状は未使用 |
 
-### 7.4 MemoStoreの操作
+### 7.5 MemoStoreの操作
 
 | メソッド | 実装 |
 | --- | --- |
@@ -331,7 +361,7 @@ CREATE TABLE memos (
 
 検索に`LIKE`を使わないため、`%`や`_`はワイルドカードではなく通常文字として扱われる。
 
-### 7.5 入力UI
+### 7.6 入力UI
 
 `src/input.ts`はNode互換`readline`を使う。
 
@@ -343,7 +373,7 @@ CREATE TABLE memos (
 
 現在は空行が送信操作なので、メモ本文の途中に空行を保存できない。
 
-### 7.6 `show`選択UI
+### 7.7 `show`選択UI
 
 `src/select.ts`はTTY専用で、入力をraw modeへ切り替える。
 
@@ -740,10 +770,11 @@ Notion MCPのTool結果はMCP content blockとして返る。現在は次を前�
 
 ### 14.2 テストが保証する範囲
 
-現在の65テストは、次を保証する。
+現在の68テストは、次を保証する。
 
 | 領域 | 主な保証 |
 | --- | --- |
+| Core | 追記、ID取得、一覧、検索、日付範囲、SQLite adapterとの組み立て |
 | Store | 改行保持、空拒否、新着順、上限、不存在、リテラル検索、日付範囲 |
 | Input | 空行確定、先頭空行、EOF |
 | Select | 上下移動と循環 |
@@ -848,7 +879,8 @@ NotionのAPIキーやOAuthトークンを環境変数へ置く設計ではない
 | やりたい変更 | 主に変更するファイル |
 | --- | --- |
 | 新しいCLIコマンド | `src/cli.ts` |
-| メモ項目・クエリ追加 | `src/store.ts`、DB migration、`tests/store.test.ts` |
+| メモのユースケース追加 | `src/core/teletypeMemoCore.ts`、`src/core/memo.ts`、Coreテスト |
+| メモ項目・SQLiteクエリ追加 | `src/store.ts`、DB migration、Storeテスト |
 | 新しいローカルAI Tool | `src/tools/memoTools.ts`または新Toolファイル、`src/tools/types.ts` |
 | Agentの判断ルール変更 | `src/gemini.ts`のsystem instruction |
 | 下書き項目追加 | `src/notion/draft.ts`、Gemini schema、MCP引数、テスト |
@@ -859,14 +891,15 @@ NotionのAPIキーやOAuthトークンを環境変数へ置く設計ではない
 
 ## 18. 学習するときの推奨読解順
 
-1. `src/cli.ts`でユースケース全体を見る。
-2. `src/store.ts`と`src/input.ts`でローカルアプリ部分を理解する。
-3. `src/tools/types.ts`と`src/tools/memoTools.ts`でToolの契約を理解する。
-4. `src/gemini.ts`の`runAgent()`でエージェントループを追う。
-5. `src/notion/draft.ts`と`draftReview.ts`で構造化出力と人間の承認を見る。
-6. `oauthCallbackServer.ts`、`oauthProvider.ts`、`keychainSecretStore.ts`でOAuthを追う。
-7. `mcpClient.ts`で認証後のMCP Tool実行を見る。
-8. 対応するテストを読み、依存をFakeへ置き換える方法を確認する。
+1. `src/cli.ts`でフロントエンド全体を見る。
+2. `src/core/memo.ts`と`src/core/teletypeMemoCore.ts`で共通APIと依存逆転を理解する。
+3. `src/openTeletypeMemoCore.ts`、`src/store.ts`、`src/input.ts`でSQLite adapterとCLI入力を見る。
+4. `src/tools/types.ts`と`src/tools/memoTools.ts`でAI Toolsも同じCoreを使うことを確認する。
+5. `src/gemini.ts`の`runAgent()`でエージェントループを追う。
+6. `src/notion/draft.ts`と`draftReview.ts`で構造化出力と人間の承認を見る。
+7. `oauthCallbackServer.ts`、`oauthProvider.ts`、`keychainSecretStore.ts`でOAuthを追う。
+8. `mcpClient.ts`で認証後のMCP Tool実行を見る。
+9. 対応するテストを読み、依存をFakeへ置き換える方法を確認する。
 
 特に学習上の中心は、次の2本である。
 

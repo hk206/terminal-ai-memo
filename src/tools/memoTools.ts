@@ -1,12 +1,21 @@
-import type { Memo } from "../store";
-import { MemoStore } from "../store";
+import type { Memo } from "../core/memo";
+import type { TeletypeMemoCore } from "../core/teletypeMemoCore";
 import type { AgentTool } from "./types";
 
-export function createMemoTools(store: MemoStore): AgentTool[] {
-  return [createListMemosTool(store), createSearchMemosTool(store), createReadMemoTool(store)];
+type MemoReader = Pick<
+  TeletypeMemoCore,
+  "getMemo" | "listMemosByDate" | "searchMemos"
+>;
+
+export function createMemoTools(memos: MemoReader): AgentTool[] {
+  return [
+    createListMemosTool(memos),
+    createSearchMemosTool(memos),
+    createReadMemoTool(memos),
+  ];
 }
 
-function createListMemosTool(store: MemoStore): AgentTool {
+function createListMemosTool(memos: MemoReader): AgentTool {
   return {
     name: "listMemos",
     description:
@@ -38,13 +47,13 @@ function createListMemosTool(store: MemoStore): AgentTool {
       const createdTo = readOptionalDate(input.createdTo, "createdTo");
       const limit = readOptionalLimit(input.limit);
 
-      const memos = store.listByDate({ createdFrom, createdTo, limit });
-      return JSON.stringify(memos.map(toMemoSummary));
+      const results = memos.listMemosByDate({ createdFrom, createdTo, limit });
+      return JSON.stringify(results.map(toMemoSummary));
     },
   };
 }
 
-function createSearchMemosTool(store: MemoStore): AgentTool {
+function createSearchMemosTool(memos: MemoReader): AgentTool {
   return {
     name: "searchMemos",
     description:
@@ -73,13 +82,13 @@ function createSearchMemosTool(store: MemoStore): AgentTool {
       const query = readRequiredString(input.query, "query");
       const limit = readOptionalLimit(input.limit);
 
-      const memos = store.search(query, limit);
-      return JSON.stringify(memos.map(toMemoSummary));
+      const results = memos.searchMemos(query, limit);
+      return JSON.stringify(results.map(toMemoSummary));
     },
   };
 }
 
-function createReadMemoTool(store: MemoStore): AgentTool {
+function createReadMemoTool(memos: MemoReader): AgentTool {
   return {
     name: "readMemo",
     description:
@@ -100,7 +109,7 @@ function createReadMemoTool(store: MemoStore): AgentTool {
     async execute(args: unknown): Promise<string> {
       const input = readObject(args);
       const id = readRequiredPositiveInteger(input.id, "id");
-      const memo = store.findById(id);
+      const memo = memos.getMemo(id);
 
       if (!memo) {
         throw new Error(`Memo #${id} not found`);

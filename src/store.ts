@@ -2,26 +2,14 @@ import { Database } from "bun:sqlite";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { getDatabasePath } from "./config";
+import type {
+  ListMemosOptions,
+  Memo,
+  MemoRepository,
+  MemoStatus,
+} from "./core/memo";
 
-export type MemoStatus = "raw" | "organized";
-
-export interface Memo {
-  id: number;
-  body: string;
-  createdAt: string;
-  updatedAt: string;
-  project: string | null;
-  projectRoot: string | null;
-  title: string | null;
-  summary: string | null;
-  status: MemoStatus;
-}
-
-export interface ListMemosOptions {
-  createdFrom?: string;
-  createdTo?: string;
-  limit?: number;
-}
+export type { ListMemosOptions, Memo, MemoStatus } from "./core/memo";
 
 interface MemoRow {
   id: number;
@@ -35,7 +23,7 @@ interface MemoRow {
   status: MemoStatus;
 }
 
-export class MemoStore {
+export class MemoStore implements MemoRepository {
   private readonly database: Database;
 
   constructor(

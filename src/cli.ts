@@ -2,6 +2,7 @@
 
 import { createInterface } from "node:readline";
 import { APP_VERSION, createHelpText } from "./appMetadata";
+import type { Memo } from "./core/memo";
 import { createGeminiAssistant } from "./gemini";
 import { readMemoInput } from "./input";
 import {
@@ -17,9 +18,8 @@ import {
 import { startOAuthCallbackServer } from "./notion/oauthCallbackServer";
 import { NotionOAuthProvider } from "./notion/oauthProvider";
 import { openExternalUrl } from "./notion/openUrl";
+import { openTeletypeMemoCore } from "./openTeletypeMemoCore";
 import { selectOption } from "./select";
-import { MemoStore } from "./store";
-import type { Memo } from "./store";
 import { createMemoTools } from "./tools/memoTools";
 
 async function main(): Promise<void> {
@@ -74,13 +74,13 @@ async function main(): Promise<void> {
     return;
   }
 
-  const store = new MemoStore();
+  const core = openTeletypeMemoCore();
 
   try {
-    const memo = store.create(body);
+    const memo = core.captureMemo(body);
     console.log(`Saved memo #${memo.id}`);
   } finally {
-    store.close();
+    core.close();
   }
 }
 
@@ -141,29 +141,29 @@ async function withNotionConnection<T>(
 }
 
 function listMemos(limit: number): void {
-  const store = new MemoStore();
+  const core = openTeletypeMemoCore();
 
   try {
-    const memos = store.list(limit);
+    const memos = core.listMemos(limit);
     printMemoSummaries(memos, "No memos found.");
   } finally {
-    store.close();
+    core.close();
   }
 }
 
 function searchMemos(query: string): void {
-  const store = new MemoStore();
+  const core = openTeletypeMemoCore();
 
   try {
-    const memos = store.search(query);
+    const memos = core.searchMemos(query);
     printMemoSummaries(memos, `No memos found for "${query}".`);
   } finally {
-    store.close();
+    core.close();
   }
 }
 
 async function askGemini(instruction: string): Promise<void> {
-  const store = new MemoStore();
+  const core = openTeletypeMemoCore();
   const assistant = createGeminiAssistant({
     onRetry: ({ status, nextAttempt, maxAttempts, delayMilliseconds }) => {
       const delaySeconds = (delayMilliseconds / 1_000).toFixed(1);
@@ -176,7 +176,7 @@ async function askGemini(instruction: string): Promise<void> {
 
   try {
     let draft = await assistant.createNotionDraft(instruction, {
-      tools: createMemoTools(store),
+      tools: createMemoTools(core),
       onToolCall: ({ name, args }) => {
         console.error(`[tool] ${name}(${JSON.stringify(args)})`);
       },
@@ -232,7 +232,7 @@ async function askGemini(instruction: string): Promise<void> {
       return;
     }
   } finally {
-    store.close();
+    core.close();
   }
 }
 
@@ -286,12 +286,12 @@ async function showMemoCommand(args: string[]): Promise<void> {
     throw new Error("Usage: memo show [id]");
   }
 
-  const store = new MemoStore();
+  const core = openTeletypeMemoCore();
 
   try {
     if (args.length === 1) {
       const id = parseMemoId(args[0]!);
-      const memo = store.findById(id);
+      const memo = core.getMemo(id);
 
       if (!memo) {
         throw new Error(`Memo #${id} not found`);
@@ -301,7 +301,7 @@ async function showMemoCommand(args: string[]): Promise<void> {
       return;
     }
 
-    const candidates = store.list(10);
+    const candidates = core.listMemos(10);
 
     if (candidates.length === 0) {
       console.log("No memos found.");
@@ -322,7 +322,7 @@ async function showMemoCommand(args: string[]): Promise<void> {
 
     printMemo(selectedMemo);
   } finally {
-    store.close();
+    core.close();
   }
 }
 
