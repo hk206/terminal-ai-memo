@@ -26,3 +26,9 @@ export interface MemoRepository {
   search(query: string, limit?: number): Memo[];
   close(): void;
 }
+
+export interface MemoReader {
+  getMemo(id: number): Memo | null;
+  listMemosByDate(options?: ListMemosOptions): Memo[];
+  searchMemos(query: string, limit?: number): Memo[];
+}

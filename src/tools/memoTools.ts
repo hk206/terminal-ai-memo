@@ -1,11 +1,5 @@
-import type { Memo } from "../core/memo";
-import type { TeletypeMemoCore } from "../core/teletypeMemoCore";
+import type { Memo, MemoReader } from "../core/memo";
 import type { AgentTool } from "./types";
-
-type MemoReader = Pick<
-  TeletypeMemoCore,
-  "getMemo" | "listMemosByDate" | "searchMemos"
->;
 
 export function createMemoTools(memos: MemoReader): AgentTool[] {
   return [

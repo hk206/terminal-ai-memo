@@ -26,7 +26,7 @@ Teletype Memoは、次の4つの領域から構成される。
 3. **人間による承認UI**：下書きをプレビューし、作成・修正・キャンセルを選ぶ。
 4. **Notion連携**：OAuth認証済みのMCPクライアントとしてNotionページを作る。
 
-現在の実装はCLIをフロントエンドにしている。ローカルメモの保存・取得・一覧・検索はすでに共通Coreへ分離され、CLIとAI Toolsが同じAPIを利用する。AI下書き・承認・MCP処理はまだCLIが調整しており、今後Coreへ移す。CLIは廃止せず、開発・デバッグ・自動化用フロントエンドとして残す。
+現在の実装はCLIをフロントエンドにしている。ローカルメモ操作に加え、AI下書きの生成・修正も共通Coreへ分離されている。CLIは承認UIとNotion MCPへの書き込みをまだ調整しており、この残りを今後Coreへ移す。CLIは廃止せず、開発・デバッグ・自動化用フロントエンドとして残す。
 
 ```mermaid
 flowchart LR
@@ -36,12 +36,13 @@ flowchart LR
     Core --> Store["MemoStore\nSQLite adapter"]
     Store --> SQLite[("SQLite")]
 
-    CLI --> Gemini["GeminiAssistant"]
+    CLI --> Agent["NotionDraftAgent"]
+    Agent --> Gemini["DraftModel\nGeminiAssistant"]
     Gemini --> Tools["Memo Tools"]
     Tools --> Core
     Gemini --> Draft["NotionPageDraft"]
     Draft --> Review["プレビューと承認"]
-    Review -->|revise| Gemini
+    Review -->|revise| Agent
     Review -->|cancel| Stop["書き込まず終了"]
     Review -->|create| OAuth["OAuth + PKCE"]
     OAuth --> Keychain["macOS Keychain"]
@@ -54,6 +55,8 @@ flowchart LR
 - メモ保存はGeminiやNotionへ依存しない。
 - CLIとAI Toolsは`MemoStore`を直接使わず、共通Coreだけを使う。
 - Core本体はSQLite実装ではなく`MemoRepository` interfaceへ依存する。
+- CLIはGeminiとMemo Toolsを直接組み立てず、`NotionDraftAgent`を使う。
+- `NotionDraftAgent`はGemini固有型ではなく`DraftModel` interfaceへ依存する。
 - Geminiに渡すToolsはローカルメモの読み取り専用である。
 - Gemini自身にはNotion書き込みToolを渡さない。
 - Notion MCPへ接続するのは、ユーザーがプレビュー後に`y`を選んだ場合だけである。
@@ -102,7 +105,9 @@ flowchart LR
 | [src/config.ts](../src/config.ts) | SQLiteファイルの保存パス決定 |
 | [src/core/memo.ts](../src/core/memo.ts) | Memoドメイン型と永続化用`MemoRepository`ポート |
 | [src/core/teletypeMemoCore.ts](../src/core/teletypeMemoCore.ts) | フロントエンド非依存のローカルメモ用ユースケースAPI |
+| [src/core/notionDraftAgent.ts](../src/core/notionDraftAgent.ts) | 下書き生成・修正ユースケースと`DraftModel`ポート |
 | [src/openTeletypeMemoCore.ts](../src/openTeletypeMemoCore.ts) | CoreとSQLite版`MemoStore`を組み立てるcomposition root |
+| [src/createNotionDraftAgent.ts](../src/createNotionDraftAgent.ts) | Agent、Gemini、Memo Toolsを組み立てるcomposition root |
 | [src/store.ts](../src/store.ts) | `MemoRepository`を実装するSQLite adapterとスキーマ |
 | [src/input.ts](../src/input.ts) | 空行で確定する複数行メモ入力 |
 | [src/select.ts](../src/select.ts) | `memo show`のTTYキー選択UI |
@@ -123,6 +128,7 @@ flowchart LR
 | --- | --- |
 | [tests/store.test.ts](../tests/store.test.ts) | SQLite保存、取得、一覧、検索、日付範囲、入力拒否 |
 | [tests/teletypeMemoCore.test.ts](../tests/teletypeMemoCore.test.ts) | Coreの追記、取得、一覧、検索、日付範囲 |
+| [tests/notionDraftAgent.test.ts](../tests/notionDraftAgent.test.ts) | 下書きAgentのTool注入、イベント転送、修正 |
 | [tests/appMetadata.test.ts](../tests/appMetadata.test.ts) | 表示名と内部IDの分離、help本文 |
 | [tests/input.test.ts](../tests/input.test.ts) | 複数行入力、空行確定、EOF |
 | [tests/select.test.ts](../tests/select.test.ts) | 選択位置の移動と循環 |
@@ -234,6 +240,7 @@ sequenceDiagram
 sequenceDiagram
     actor U as User
     participant C as CLI
+    participant A as NotionDraftAgent
     participant G as GeminiAssistant
     participant T as Memo Tools
     participant Core as TeletypeMemoCore
@@ -241,7 +248,8 @@ sequenceDiagram
     participant M as Notion MCP
 
     U->>C: memo ask instruction
-    C->>G: createNotionDraft(instruction, tools)
+    C->>A: createDraft(instruction)
+    A->>G: createNotionDraft(instruction, memoTools)
     loop 最大6ステップ
         G->>G: Gemini Generate Content
         alt Tool callあり
@@ -252,7 +260,8 @@ sequenceDiagram
             Core-->>T: Memo data
             T-->>G: JSON result
         else 最終回答
-            G-->>C: NotionPageDraft
+            G-->>A: NotionPageDraft
+            A-->>C: NotionPageDraft
         end
     end
     C-->>U: title/body/source IDsを表示
@@ -260,8 +269,10 @@ sequenceDiagram
         C-->>U: 書き込まず終了
     else r
         U->>C: 修正指示
-        C->>G: reviseNotionDraft(current, feedback)
-        G-->>C: 修正版
+        C->>A: reviseDraft(current, feedback)
+        A->>G: reviseNotionDraft(current, feedback)
+        G-->>A: 修正版
+        A-->>C: 修正版
         C-->>U: 再プレビュー
     else y
         C->>M: OAuth済み接続
@@ -273,7 +284,7 @@ sequenceDiagram
 
 ### 6.5 承認ループ
 
-`askGemini()`は`while (true)`で同じ下書きをプレビューする。
+`askAgent()`は`while (true)`で同じ下書きをプレビューする。
 
 | 入力 | `parseDraftReviewAction` | 結果 |
 | --- | --- | --- |
@@ -424,7 +435,22 @@ Tool引数は実行時にも検証する。
 
 JSON Schemaだけに依存せず実行時検証も行うのは、LLM出力を信頼境界の外側として扱うためである。
 
-### 8.3 GeminiAssistant
+### 8.3 NotionDraftAgent
+
+`src/core/notionDraftAgent.ts`は、フロントエンド非依存のAI下書きユースケースである。
+
+| メソッド | 用途 |
+| --- | --- |
+| `createDraft(instruction, options)` | Memo Toolsをモデルへ渡して初回下書きを作る |
+| `reviseDraft(draft, instruction)` | 現在の下書きと修正指示から修正版を作る |
+
+モデルへの依存は`DraftModel` interfaceで表す。必要な操作は`createNotionDraft()`と`reviseNotionDraft()`だけであり、CoreはGoogle SDKやAPIキーを知らない。`createNotionDraftAgent()`が本番用の`GeminiAssistant`と`createMemoTools()`を組み立てる。
+
+Tool callの表示はCore内で`console`を呼ばず、`onToolCall`イベントとしてフロントエンドへ返す。CLIはこれをstderrへ表示し、将来のデスクトップUIは進捗表示へ変換できる。
+
+ローカルメモ用`TeletypeMemoCore`とAI用`NotionDraftAgent`を別オブジェクトにしたため、通常のメモ保存ではGemini APIキーやネットワークを必要としない。
+
+### 8.4 GeminiAssistant
 
 `GeminiAssistant`はGoogle SDKそのものではなく、テスト可能な`GenerateContent`関数をコンストラクタで受け取る。
 
@@ -441,7 +467,7 @@ JSON Schemaだけに依存せず実行時検証も行うのは、LLM出力を信
 | `createNotionDraft()` | Toolsを使って構造化された初回下書きを作る |
 | `reviseNotionDraft()` | 現在の下書きと修正指示から修正版を作る |
 
-### 8.4 Tool実行ループ
+### 8.5 Tool実行ループ
 
 `runAgent()`は最大6ステップで次を繰り返す。
 
@@ -456,7 +482,7 @@ JSON Schemaだけに依存せず実行時検証も行うのは、LLM出力を信
 
 Toolエラーは直ちにCLI全体を失敗させず、Geminiへ返す。これにより、Geminiは引数を修正したり別Toolを選んだりできる。最大ステップに達した場合は無限ループ防止のため例外にする。
 
-### 8.5 会話履歴
+### 8.6 会話履歴
 
 履歴はGeminiの`Content[]`として保持する。
 
@@ -469,7 +495,7 @@ user instruction
 
 モデルが返した`candidateContent`を優先して履歴へ戻す。これはSDKが付与するTool call IDなどを保持するためである。テスト用Fakeが`candidateContent`を返さない場合だけ、自前でmodel contentを組み立てる。
 
-### 8.6 System instruction
+### 8.7 System instruction
 
 毎回次の情報を与える。
 
@@ -484,7 +510,7 @@ user instruction
 
 構造化下書きではさらに、Markdown本文、タイトル重複禁止、sourceMemoIdsのルールを追加する。
 
-### 8.7 構造化出力
+### 8.8 構造化出力
 
 下書き生成時はGeminiリクエストへ次を指定する。
 
@@ -510,7 +536,7 @@ type NotionPageDraft = {
 - 重複IDは最初の出現を残して削除する。
 - 不正JSONや不正フィールドはNotionへ進む前に例外にする。
 
-### 8.8 リトライ
+### 8.9 リトライ
 
 各Generate Contentリクエストの`config.httpOptions.timeout`には60,000msを指定する。Geminiまたはネットワークから応答が戻らない場合に、CLIが無期限に待ち続けることを防ぐためである。SDKがタイムアウト例外を返した場合は、利用者向けの短いメッセージへ変換する。
 
@@ -770,11 +796,12 @@ Notion MCPのTool結果はMCP content blockとして返る。現在は次を前�
 
 ### 14.2 テストが保証する範囲
 
-現在の68テストは、次を保証する。
+現在の70テストは、次を保証する。
 
 | 領域 | 主な保証 |
 | --- | --- |
 | Core | 追記、ID取得、一覧、検索、日付範囲、SQLite adapterとの組み立て |
+| Draft Agent | Memo Toolsの注入、Toolイベント転送、モデルポート経由の修正 |
 | Store | 改行保持、空拒否、新着順、上限、不存在、リテラル検索、日付範囲 |
 | Input | 空行確定、先頭空行、EOF |
 | Select | 上下移動と循環 |
@@ -798,6 +825,7 @@ Notion MCPのTool結果はMCP content blockとして返る。現在は次を前�
 - 再表示後の`n`でもNotionへ何も作成しない。
 - `y`を選んだ後だけNotion MCPへ接続し、Privateページを1件作成してURLを表示する。
 - 応答しないGeminiリクエストに上限がない問題をE2E中に発見し、60秒のSDKタイムアウト設定と回帰テストを追加した。
+- `NotionDraftAgent`抽出後も、合成メモで`searchMemos`、`listMemos`、`readMemo`、プレビュー、`n`による未作成終了を再確認した。
 
 この確認では`GEMINI_MODEL=gemini-3.6-flash`をコマンド単位で明示した。ローカル設定で選ばれていた3.7 Flashは確認時に504を返したため、モデル名の上書きが実際の挙動へ反映されることも確認できた。
 
@@ -881,6 +909,7 @@ NotionのAPIキーやOAuthトークンを環境変数へ置く設計ではない
 | 新しいCLIコマンド | `src/cli.ts` |
 | メモのユースケース追加 | `src/core/teletypeMemoCore.ts`、`src/core/memo.ts`、Coreテスト |
 | メモ項目・SQLiteクエリ追加 | `src/store.ts`、DB migration、Storeテスト |
+| AI下書きユースケース変更 | `src/core/notionDraftAgent.ts`、`src/createNotionDraftAgent.ts`、Agentテスト |
 | 新しいローカルAI Tool | `src/tools/memoTools.ts`または新Toolファイル、`src/tools/types.ts` |
 | Agentの判断ルール変更 | `src/gemini.ts`のsystem instruction |
 | 下書き項目追加 | `src/notion/draft.ts`、Gemini schema、MCP引数、テスト |
@@ -894,12 +923,13 @@ NotionのAPIキーやOAuthトークンを環境変数へ置く設計ではない
 1. `src/cli.ts`でフロントエンド全体を見る。
 2. `src/core/memo.ts`と`src/core/teletypeMemoCore.ts`で共通APIと依存逆転を理解する。
 3. `src/openTeletypeMemoCore.ts`、`src/store.ts`、`src/input.ts`でSQLite adapterとCLI入力を見る。
-4. `src/tools/types.ts`と`src/tools/memoTools.ts`でAI Toolsも同じCoreを使うことを確認する。
-5. `src/gemini.ts`の`runAgent()`でエージェントループを追う。
-6. `src/notion/draft.ts`と`draftReview.ts`で構造化出力と人間の承認を見る。
-7. `oauthCallbackServer.ts`、`oauthProvider.ts`、`keychainSecretStore.ts`でOAuthを追う。
-8. `mcpClient.ts`で認証後のMCP Tool実行を見る。
-9. 対応するテストを読み、依存をFakeへ置き換える方法を確認する。
+4. `src/core/notionDraftAgent.ts`と`src/createNotionDraftAgent.ts`でモデルポートと組み立てを見る。
+5. `src/tools/types.ts`と`src/tools/memoTools.ts`でAI Toolsも同じCoreを使うことを確認する。
+6. `src/gemini.ts`の`runAgent()`でエージェントループを追う。
+7. `src/notion/draft.ts`と`draftReview.ts`で構造化出力と人間の承認を見る。
+8. `oauthCallbackServer.ts`、`oauthProvider.ts`、`keychainSecretStore.ts`でOAuthを追う。
+9. `mcpClient.ts`で認証後のMCP Tool実行を見る。
+10. 対応するテストを読み、依存をFakeへ置き換える方法を確認する。
 
 特に学習上の中心は、次の2本である。
 

@@ -3,7 +3,7 @@
 import { createInterface } from "node:readline";
 import { APP_VERSION, createHelpText } from "./appMetadata";
 import type { Memo } from "./core/memo";
-import { createGeminiAssistant } from "./gemini";
+import { createNotionDraftAgent } from "./createNotionDraftAgent";
 import { readMemoInput } from "./input";
 import {
   formatNotionPageDraft,
@@ -20,7 +20,6 @@ import { NotionOAuthProvider } from "./notion/oauthProvider";
 import { openExternalUrl } from "./notion/openUrl";
 import { openTeletypeMemoCore } from "./openTeletypeMemoCore";
 import { selectOption } from "./select";
-import { createMemoTools } from "./tools/memoTools";
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
@@ -53,7 +52,7 @@ async function main(): Promise<void> {
   }
 
   if (args[0] === "ask") {
-    await askGemini(parseAskInstruction(args.slice(1)));
+    await askAgent(parseAskInstruction(args.slice(1)));
     return;
   }
 
@@ -162,9 +161,9 @@ function searchMemos(query: string): void {
   }
 }
 
-async function askGemini(instruction: string): Promise<void> {
+async function askAgent(instruction: string): Promise<void> {
   const core = openTeletypeMemoCore();
-  const assistant = createGeminiAssistant({
+  const agent = createNotionDraftAgent(core, {
     onRetry: ({ status, nextAttempt, maxAttempts, delayMilliseconds }) => {
       const delaySeconds = (delayMilliseconds / 1_000).toFixed(1);
       console.error(
@@ -175,8 +174,7 @@ async function askGemini(instruction: string): Promise<void> {
   });
 
   try {
-    let draft = await assistant.createNotionDraft(instruction, {
-      tools: createMemoTools(core),
+    let draft = await agent.createDraft(instruction, {
       onToolCall: ({ name, args }) => {
         console.error(`[tool] ${name}(${JSON.stringify(args)})`);
       },
@@ -221,10 +219,7 @@ async function askGemini(instruction: string): Promise<void> {
           continue;
         }
 
-        draft = await assistant.reviseNotionDraft(
-          draft,
-          revisionInstruction,
-        );
+        draft = await agent.reviseDraft(draft, revisionInstruction);
         continue;
       }
 
