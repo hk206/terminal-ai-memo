@@ -26,6 +26,8 @@ Terminal AI Memoは、次の4つの領域から構成される。
 3. **人間による承認UI**：下書きをプレビューし、作成・修正・キャンセルを選ぶ。
 4. **Notion連携**：OAuth認証済みのMCPクライアントとしてNotionページを作る。
 
+現在の実装はCLIをフロントエンドにしているが、将来は保存・AI・MCP処理を共通Coreとして抽出し、同じCoreをデスクトップのグローバルショートカット入力UIから利用する。CLIは廃止せず、開発・デバッグ・自動化用フロントエンドとして残す。
+
 ```mermaid
 flowchart LR
     User["ユーザー"] --> CLI["src/cli.ts\nコマンド振り分け"]
@@ -149,7 +151,7 @@ PRDに記載されていても、次は`src/cli.ts`に未実装である。
 - `memo --version`
 - `memo notion status`
 - `memo config`
-- `memo edit`、`memo delete`、`memo export`
+- `memo export`、`memo config`、管理用の`memo purge --all`
 
 注意点として、未知の第1引数はコマンドエラーではなく一行メモとして保存される。したがって現状で`memo --help`を実行すると、`--help`という本文のメモを保存する。
 
@@ -786,6 +788,7 @@ NotionのAPIキーやOAuthトークンを環境変数へ置く設計ではない
 ### 16.1 機能上の制約
 
 - 複数行メモ本文へ空行を含められない。
+- 元メモを編集できないことは意図したプロダクト制約であり、訂正は新しいメモとして追記する。
 - 修正指示は一行だけである。
 - Notion保存先はPrivate固定で、親ページやデータベースを選べない。
 - 作成後もローカルメモの`status`は`raw`のままである。

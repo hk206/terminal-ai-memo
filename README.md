@@ -2,6 +2,8 @@
 
 Terminal AI Memo is a local-first CLI inbox for capturing thoughts without leaving the terminal and organizing them with AI later.
 
+Raw memos are append-only: corrections are captured as new memos, while AI-generated Markdown and Notion pages are treated as derived documents. The current CLI is the first frontend; a future desktop frontend can invoke the same core from a global shortcut.
+
 > This project is in early development. Local memo capture, Gemini-powered investigation, approval-gated revision, and Notion MCP page creation are implemented. Destination configuration and production hardening are still in progress.
 
 ## Requirements
