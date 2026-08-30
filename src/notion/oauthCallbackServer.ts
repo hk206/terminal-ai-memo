@@ -1,4 +1,5 @@
 import { createServer, type Server } from "node:http";
+import { PRODUCT_NAME } from "../appMetadata";
 
 export type OAuthCallbackServer = {
   callbackUrl: URL;
@@ -127,7 +128,7 @@ function sendBrowserResult(
   });
   response.end(`<!doctype html>
 <html lang="en">
-  <head><meta charset="utf-8"><title>Terminal AI Memo</title></head>
+  <head><meta charset="utf-8"><title>${PRODUCT_NAME}</title></head>
   <body>
     <h1>${success ? "Authorization complete" : "Authorization failed"}</h1>
     <p>${message}</p>

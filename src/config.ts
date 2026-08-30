@@ -1,7 +1,7 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { INTERNAL_APP_ID } from "./appMetadata";
 
-const APP_DIRECTORY = "terminal-ai-memo";
 const DATABASE_FILENAME = "memos.db";
 
 export function getDatabasePath(): string {
@@ -14,7 +14,7 @@ export function getDatabasePath(): string {
   const xdgDataHome = process.env.XDG_DATA_HOME?.trim();
 
   if (xdgDataHome) {
-    return join(xdgDataHome, APP_DIRECTORY, DATABASE_FILENAME);
+    return join(xdgDataHome, INTERNAL_APP_ID, DATABASE_FILENAME);
   }
 
   if (process.platform === "darwin") {
@@ -22,7 +22,7 @@ export function getDatabasePath(): string {
       homedir(),
       "Library",
       "Application Support",
-      APP_DIRECTORY,
+      INTERNAL_APP_ID,
       DATABASE_FILENAME,
     );
   }
@@ -31,7 +31,7 @@ export function getDatabasePath(): string {
     homedir(),
     ".local",
     "share",
-    APP_DIRECTORY,
+    INTERNAL_APP_ID,
     DATABASE_FILENAME,
   );
 }

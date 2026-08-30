@@ -1,3 +1,5 @@
+import { INTERNAL_APP_ID } from "../appMetadata";
+
 export type CommandResult = {
   exitCode: number;
   stdout: string;
@@ -14,7 +16,7 @@ export interface SecretStore {
   delete(): Promise<void>;
 }
 
-const DEFAULT_SERVICE = "terminal-ai-memo.notion-mcp";
+const DEFAULT_SERVICE = `${INTERNAL_APP_ID}.notion-mcp`;
 const DEFAULT_ACCOUNT = "oauth";
 const ITEM_NOT_FOUND_EXIT_CODE = 44;
 

@@ -6,6 +6,7 @@ import type {
   OAuthTokens,
 } from "@modelcontextprotocol/sdk/shared/auth.js";
 import type { SecretStore } from "./keychainSecretStore";
+import { PRODUCT_NAME } from "../appMetadata";
 
 type StoredOAuthCredentials = {
   clientInformation?: OAuthClientInformationMixed;
@@ -33,7 +34,7 @@ export class NotionOAuthProvider implements OAuthClientProvider {
 
   get clientMetadata(): OAuthClientMetadata {
     return {
-      client_name: "Terminal AI Memo",
+      client_name: PRODUCT_NAME,
       redirect_uris: [this.callbackUrl.toString()],
       grant_types: ["authorization_code", "refresh_token"],
       response_types: ["code"],

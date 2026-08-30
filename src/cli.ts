@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 
 import { createInterface } from "node:readline";
+import { APP_VERSION, createHelpText } from "./appMetadata";
 import { createGeminiAssistant } from "./gemini";
 import { readMemoInput } from "./input";
 import {
@@ -23,6 +24,18 @@ import { createMemoTools } from "./tools/memoTools";
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
+
+  if (args[0] === "--help" || args[0] === "-h") {
+    requireNoAdditionalArguments(args, "memo --help");
+    console.log(createHelpText());
+    return;
+  }
+
+  if (args[0] === "--version" || args[0] === "-v") {
+    requireNoAdditionalArguments(args, "memo --version");
+    console.log(APP_VERSION);
+    return;
+  }
 
   if (args[0] === "list") {
     listMemos(parseListLimit(args.slice(1)));
@@ -336,6 +349,12 @@ function parseMemoId(value: string): number {
   }
 
   return id;
+}
+
+function requireNoAdditionalArguments(args: string[], usage: string): void {
+  if (args.length !== 1) {
+    throw new Error(`Usage: ${usage}`);
+  }
 }
 
 function parseListLimit(args: string[]): number {

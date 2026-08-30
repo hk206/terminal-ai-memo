@@ -1,6 +1,6 @@
-# Terminal AI Memo
+# Teletype Memo
 
-Terminal AI Memo is a local-first CLI inbox for capturing thoughts without leaving the terminal and organizing them with AI later.
+Teletype Memo is a local-first, append-only inbox for capturing thoughts without leaving your work and organizing them with AI later.
 
 Raw memos are append-only: corrections are captured as new memos, while AI-generated Markdown and Notion pages are treated as derived documents. The current CLI is the first frontend; a future desktop frontend can invoke the same core from a global shortcut.
 
@@ -42,6 +42,13 @@ bun run memo list
 bun run memo show
 bun run memo show 1
 bun run memo search "context compression"
+```
+
+Show CLI help or the current version:
+
+```bash
+bun run memo --help
+bun run memo --version
 ```
 
 Ask Gemini to investigate local memos and prepare a Notion page:

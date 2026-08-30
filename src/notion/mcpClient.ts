@@ -5,6 +5,7 @@ import {
   type OAuthClientProvider,
 } from "@modelcontextprotocol/sdk/client/auth.js";
 import type { NotionPageDraft } from "./draft";
+import { APP_VERSION, INTERNAL_APP_ID } from "../appMetadata";
 
 export const NOTION_MCP_URL = "https://mcp.notion.com/mcp";
 
@@ -111,8 +112,8 @@ export async function connectToNotionMcp(
   }
 
   const client = new Client({
-    name: "terminal-ai-memo",
-    version: "0.1.0",
+    name: INTERNAL_APP_ID,
+    version: APP_VERSION,
   });
   const transport = new StreamableHTTPClientTransport(
     new URL(NOTION_MCP_URL),
@@ -120,7 +121,7 @@ export async function connectToNotionMcp(
       requestInit: {
         headers: {
           Authorization: `Bearer ${accessToken}`,
-          "User-Agent": "terminal-ai-memo/0.1.0",
+          "User-Agent": `${INTERNAL_APP_ID}/${APP_VERSION}`,
         },
       },
     },
@@ -170,8 +171,8 @@ function createOAuthClient(provider: OAuthClientProvider): {
   transport: StreamableHTTPClientTransport;
 } {
   const client = new Client({
-    name: "terminal-ai-memo",
-    version: "0.1.0",
+    name: INTERNAL_APP_ID,
+    version: APP_VERSION,
   });
   const transport = new StreamableHTTPClientTransport(
     new URL(NOTION_MCP_URL),

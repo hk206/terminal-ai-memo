@@ -14,7 +14,7 @@ describe("NotionOAuthProvider", () => {
 
     expect(provider.redirectUrl).toEqual(CALLBACK_URL);
     expect(provider.clientMetadata).toEqual({
-      client_name: "Terminal AI Memo",
+      client_name: "Teletype Memo",
       redirect_uris: [CALLBACK_URL.toString()],
       grant_types: ["authorization_code", "refresh_token"],
       response_types: ["code"],

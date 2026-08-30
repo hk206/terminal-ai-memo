@@ -1,8 +1,8 @@
-# Terminal AI Memo 詳細設計書
+# Teletype Memo 詳細設計書
 
 ## 1. この文書の目的
 
-この文書は、Terminal AI Memoの現在のコードを学習目的で理解するための詳細設計書である。
+この文書は、Teletype Memoの現在のコードを学習目的で理解するための詳細設計書である。
 
 対象は、リポジトリに含まれるアプリケーションコード、テスト、設定ファイル、生成ファイルである。プロダクトとして何を作るかは[PRD](./PRD.md)、利用方法は[README](../README.md)を参照し、この文書では主に次を説明する。
 
@@ -15,11 +15,11 @@
 - テストが保証している範囲
 - 現在の制約と未実装部分
 
-この文書は`main`ブランチの`6749c9d`時点の実装を基準にしている。
+この文書は`main`ブランチの現在の実装を基準にしている。
 
 ## 2. システムの全体像
 
-Terminal AI Memoは、次の4つの領域から構成される。
+Teletype Memoは、次の4つの領域から構成される。
 
 1. **ローカル受信箱**：ターミナルからメモを受け取り、SQLiteへ保存する。
 2. **AIエージェント**：Geminiがローカルメモ用Toolsを選択・実行し、Notionページ案を作る。
@@ -95,6 +95,7 @@ flowchart LR
 | ファイル | 責務 |
 | --- | --- |
 | [src/cli.ts](../src/cli.ts) | 唯一のCLIエントリーポイント。コマンド振り分けとユースケース調整 |
+| [src/appMetadata.ts](../src/appMetadata.ts) | 表示名、互換性用内部ID、バージョン、help本文 |
 | [src/config.ts](../src/config.ts) | SQLiteファイルの保存パス決定 |
 | [src/store.ts](../src/store.ts) | SQLiteスキーマとメモCRUDの読み書き |
 | [src/input.ts](../src/input.ts) | 空行で確定する複数行メモ入力 |
@@ -115,6 +116,7 @@ flowchart LR
 | ファイル | 対象 |
 | --- | --- |
 | [tests/store.test.ts](../tests/store.test.ts) | SQLite保存、取得、一覧、検索、日付範囲、入力拒否 |
+| [tests/appMetadata.test.ts](../tests/appMetadata.test.ts) | 表示名と内部IDの分離、help本文 |
 | [tests/input.test.ts](../tests/input.test.ts) | 複数行入力、空行確定、EOF |
 | [tests/select.test.ts](../tests/select.test.ts) | 選択位置の移動と循環 |
 | [tests/memoTools.test.ts](../tests/memoTools.test.ts) | 3つのMemo Toolsと引数検証 |
@@ -126,6 +128,18 @@ flowchart LR
 | [tests/oauthCallbackServer.test.ts](../tests/oauthCallbackServer.test.ts) | code、state、拒否応答、404 |
 | [tests/openUrl.test.ts](../tests/openUrl.test.ts) | ブラウザ起動成功・失敗 |
 | [tests/notionMcpClient.test.ts](../tests/notionMcpClient.test.ts) | Tool一覧、identity、ページ作成、close、トークン検証 |
+
+### 4.4 表示名と内部識別子
+
+`src/appMetadata.ts`は、人に見せる名称と既存データ互換性のための識別子を分離する。
+
+| 定数 | 値 | 用途 |
+| --- | --- | --- |
+| `PRODUCT_NAME` | `Teletype Memo` | help、Gemini system instruction、OAuth表示名、ブラウザ完了画面 |
+| `INTERNAL_APP_ID` | `terminal-ai-memo` | SQLiteディレクトリ、Keychain service、MCP client名、User-Agent |
+| `APP_VERSION` | `0.1.0` | `--version`、MCP client version、User-Agent |
+
+内部IDを一度に変更すると、既存SQLiteとKeychain資格情報が新しいアプリから見えなくなる。そのため、プロダクト名だけを変更し、内部IDは移行機構を用意するまで維持する。
 
 ## 5. 実装済みコマンド
 
@@ -142,18 +156,18 @@ flowchart LR
 | `memo search QUERY` | 本文を大文字・小文字を区別せず部分一致検索する |
 | `memo ask INSTRUCTION` | Geminiがメモを調査し、下書き・修正・承認・Notion作成を行う |
 | `memo notion connect` | OAuth認証、ワークスペース確認、MCP Tool一覧表示を行う |
+| `memo --help`、`memo -h` | 実装済みコマンドとオプションを表示する |
+| `memo --version`、`memo -v` | `0.1.0`を表示する |
 
 ### 5.1 現在まだ実装されていないコマンド
 
 PRDに記載されていても、次は`src/cli.ts`に未実装である。
 
-- `memo --help`
-- `memo --version`
 - `memo notion status`
 - `memo config`
 - `memo export`、`memo config`、管理用の`memo purge --all`
 
-注意点として、未知の第1引数はコマンドエラーではなく一行メモとして保存される。したがって現状で`memo --help`を実行すると、`--help`という本文のメモを保存する。
+注意点として、既知のコマンド・オプション以外の第1引数はコマンドエラーではなく一行メモとして保存される。
 
 ## 6. CLIの詳細設計
 
@@ -429,7 +443,7 @@ user instruction
 
 毎回次の情報を与える。
 
-- Terminal AI Memoのアシスタントであること
+- Teletype Memoのアシスタントであること
 - ユーザーと同じ言語で答えること
 - 現在日時のISO文字列
 - ユーザーのタイムゾーン
@@ -571,7 +585,7 @@ MCP SDKの`OAuthClientProvider`を実装するアダプターである。
 クライアントメタデータは次の設計である。
 
 ```text
-client_name: Terminal AI Memo
+client_name: Teletype Memo
 grant_types: authorization_code, refresh_token
 response_types: code
 token_endpoint_auth_method: none
@@ -723,7 +737,7 @@ Notion MCPのTool結果はMCP content blockとして返る。現在は次を前�
 
 ### 14.2 テストが保証する範囲
 
-現在の61テストは、次を保証する。
+現在の63テストは、次を保証する。
 
 | 領域 | 主な保証 |
 | --- | --- |
@@ -811,7 +825,7 @@ NotionのAPIキーやOAuthトークンを環境変数へ置く設計ではない
 
 ### 16.3 ドキュメントと実装の差分
 
-- PRDにある`--help`、`--version`、`notion status`は未実装。
+- PRDにある`notion status`は未実装。
 - README冒頭の開発状況は機能追加時に更新漏れが起きやすいため、受け入れ条件と同時に更新する必要がある。
 - PRDのチェックボックスは実装後に最新状態へ同期する必要がある。
 

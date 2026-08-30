@@ -5,6 +5,7 @@ import type {
   GenerateContentParameters,
 } from "@google/genai";
 import type { AgentTool } from "./tools/types";
+import { PRODUCT_NAME } from "./appMetadata";
 import {
   NOTION_PAGE_DRAFT_SCHEMA,
   parseNotionPageDraft,
@@ -237,7 +238,7 @@ function createSystemInstruction(
     options.timeZone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
 
   const instructions = [
-    "You are the assistant for Terminal AI Memo.",
+    `You are the assistant for ${PRODUCT_NAME}.`,
     "Reply in the same language as the user.",
     `Current datetime: ${now.toISOString()}`,
     `User timezone: ${timeZone}`,
