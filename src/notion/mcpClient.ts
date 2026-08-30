@@ -4,6 +4,7 @@ import {
   UnauthorizedError,
   type OAuthClientProvider,
 } from "@modelcontextprotocol/sdk/client/auth.js";
+import type { NotionPageDraft } from "./draft";
 
 export const NOTION_MCP_URL = "https://mcp.notion.com/mcp";
 
@@ -15,6 +16,11 @@ export type NotionMcpTool = {
 export type NotionWorkspaceIdentity = {
   workspace: { id: string; name: string };
   user: { id: string; name: string };
+};
+
+export type CreatedNotionPage = {
+  id: string;
+  url: string;
 };
 
 export interface McpClientPort {
@@ -59,6 +65,36 @@ export class NotionMcpConnection {
         id: readString(user, "id"),
         name: readString(user, "name"),
       },
+    };
+  }
+
+  async createPage(draft: NotionPageDraft): Promise<CreatedNotionPage> {
+    const result = await this.client.callTool({
+      name: "notion-create-pages",
+      arguments: {
+        pages: [
+          {
+            properties: { title: draft.title },
+            content: draft.body,
+          },
+        ],
+      },
+    });
+    const payload = parseTextToolResult(result);
+
+    if (!isRecord(payload) || !Array.isArray(payload.pages)) {
+      throw new Error("Notion MCP did not return a created page");
+    }
+
+    const page = payload.pages[0];
+
+    if (!isRecord(page)) {
+      throw new Error("Notion MCP did not return a created page");
+    }
+
+    return {
+      id: readString(page, "id"),
+      url: readString(page, "url"),
     };
   }
 

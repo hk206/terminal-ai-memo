@@ -42,13 +42,22 @@ bun run memo show 1
 bun run memo search "context compression"
 ```
 
-Send a natural-language instruction to Gemini:
+Ask Gemini to investigate local memos and prepare a Notion page:
 
 ```bash
 bun run memo ask "今日一日分のメモをまとめて"
 ```
 
 Gemini can use the read-only `listMemos`, `searchMemos`, and `readMemo` Tools to investigate local memos before answering. Tool calls are shown in the terminal while the agent runs.
+
+The CLI previews the generated title, Markdown body, and source memo IDs before writing anything to Notion:
+
+```text
+[y] Create in Notion  [r] Revise  [n] Cancel
+>
+```
+
+Choose `r` to enter a revision instruction and preview the updated draft again. Choose `n` or press Enter to exit without writing to Notion. Only `y` connects to Notion MCP and creates a private page.
 
 The Gemini API free tier may use submitted content to improve Google's products. Use synthetic or non-sensitive memos while developing with the free tier.
 

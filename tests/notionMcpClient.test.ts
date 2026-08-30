@@ -43,6 +43,50 @@ describe("NotionMcpConnection", () => {
     ]);
   });
 
+  test("creates a private Notion page from an approved draft", async () => {
+    const client = new FakeMcpClient();
+    client.toolResult = {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({
+            pages: [
+              {
+                id: "page-id",
+                url: "https://www.notion.so/page-id",
+              },
+            ],
+          }),
+        },
+      ],
+    };
+    const connection = new NotionMcpConnection(client);
+
+    await expect(
+      connection.createPage({
+        title: "Learning log",
+        body: "## Today\nLearned about MCP.",
+        sourceMemoIds: [1],
+      }),
+    ).resolves.toEqual({
+      id: "page-id",
+      url: "https://www.notion.so/page-id",
+    });
+    expect(client.toolCalls).toEqual([
+      {
+        name: "notion-create-pages",
+        arguments: {
+          pages: [
+            {
+              properties: { title: "Learning log" },
+              content: "## Today\nLearned about MCP.",
+            },
+          ],
+        },
+      },
+    ]);
+  });
+
   test("closes the underlying MCP client", async () => {
     const client = new FakeMcpClient();
     const connection = new NotionMcpConnection(client);

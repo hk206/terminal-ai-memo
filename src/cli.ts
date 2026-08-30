@@ -1,9 +1,18 @@
 #!/usr/bin/env bun
 
+import { createInterface } from "node:readline";
 import { createGeminiAssistant } from "./gemini";
 import { readMemoInput } from "./input";
+import {
+  formatNotionPageDraft,
+  type NotionPageDraft,
+} from "./notion/draft";
+import { parseDraftReviewAction } from "./notion/draftReview";
 import { KeychainSecretStore } from "./notion/keychainSecretStore";
-import { connectToNotionMcpWithOAuth } from "./notion/mcpClient";
+import {
+  connectToNotionMcpWithOAuth,
+  type NotionMcpConnection,
+} from "./notion/mcpClient";
 import { startOAuthCallbackServer } from "./notion/oauthCallbackServer";
 import { NotionOAuthProvider } from "./notion/oauthProvider";
 import { openExternalUrl } from "./notion/openUrl";
@@ -71,6 +80,23 @@ async function runNotionCommand(args: string[]): Promise<void> {
 }
 
 async function connectNotion(): Promise<void> {
+  await withNotionConnection(async (connection) => {
+    const [identity, tools] = await Promise.all([
+      connection.getWorkspaceIdentity(),
+      connection.listTools(),
+    ]);
+
+    console.log(
+      `Connected to ${identity.workspace.name} as ${identity.user.name}.`,
+    );
+    console.log(`Available MCP tools: ${tools.length}`);
+    console.log(tools.map((tool) => tool.name).join(", "));
+  });
+}
+
+async function withNotionConnection<T>(
+  operation: (connection: NotionMcpConnection) => Promise<T>,
+): Promise<T> {
   const callbackServer = await startOAuthCallbackServer();
   const provider = new NotionOAuthProvider(
     new KeychainSecretStore(),
@@ -94,16 +120,7 @@ async function connectNotion(): Promise<void> {
       provider,
       () => authorizationCode,
     );
-    const [identity, tools] = await Promise.all([
-      connection.getWorkspaceIdentity(),
-      connection.listTools(),
-    ]);
-
-    console.log(
-      `Connected to ${identity.workspace.name} as ${identity.user.name}.`,
-    );
-    console.log(`Available MCP tools: ${tools.length}`);
-    console.log(tools.map((tool) => tool.name).join(", "));
+    return await operation(connection);
   } finally {
     await connection?.close();
     await callbackServer.close();
@@ -145,16 +162,98 @@ async function askGemini(instruction: string): Promise<void> {
   });
 
   try {
-    const response = await assistant.ask(instruction, {
+    let draft = await assistant.createNotionDraft(instruction, {
       tools: createMemoTools(store),
       onToolCall: ({ name, args }) => {
         console.error(`[tool] ${name}(${JSON.stringify(args)})`);
       },
     });
-    console.log(response);
+
+    while (true) {
+      console.log();
+      console.log(formatNotionPageDraft(draft));
+      const choice = await readTerminalLine(
+        "[y] Create in Notion  [r] Revise  [n] Cancel\n> ",
+      );
+
+      if (choice === null) {
+        console.log("\nCanceled. Nothing was written to Notion.");
+        return;
+      }
+
+      const action = parseDraftReviewAction(choice);
+
+      if (action === "cancel") {
+        console.log("Canceled. Nothing was written to Notion.");
+        return;
+      }
+
+      if (action === "invalid") {
+        console.log("Enter y to create, r to revise, or n to cancel.");
+        continue;
+      }
+
+      if (action === "revise") {
+        const revisionInstruction = await readTerminalLine(
+          "Revision instruction: ",
+        );
+
+        if (revisionInstruction === null) {
+          console.log("\nCanceled. Nothing was written to Notion.");
+          return;
+        }
+
+        if (revisionInstruction.trim().length === 0) {
+          console.log("Revision instruction cannot be empty.");
+          continue;
+        }
+
+        draft = await assistant.reviseNotionDraft(
+          draft,
+          revisionInstruction,
+        );
+        continue;
+      }
+
+      await createNotionPage(draft);
+      return;
+    }
   } finally {
     store.close();
   }
+}
+
+async function createNotionPage(draft: NotionPageDraft): Promise<void> {
+  const page = await withNotionConnection((connection) =>
+    connection.createPage(draft),
+  );
+
+  console.log(`Created Notion page: ${page.url}`);
+}
+
+function readTerminalLine(prompt: string): Promise<string | null> {
+  return new Promise((resolve) => {
+    const readline = createInterface({
+      input: process.stdin,
+      output: process.stdout,
+      terminal: Boolean(process.stdin.isTTY),
+    });
+    let settled = false;
+
+    const finish = (value: string | null): void => {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
+      readline.close();
+      resolve(value);
+    };
+
+    readline.once("SIGINT", () => finish(null));
+    readline.once("close", () => finish(null));
+    readline.question(prompt, (answer) => finish(answer));
+  });
 }
 
 function printMemoSummaries(memos: Memo[], emptyMessage: string): void {
