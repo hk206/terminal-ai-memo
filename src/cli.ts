@@ -174,20 +174,27 @@ async function askAgent(instruction: string): Promise<void> {
   });
 
   try {
-    let draft = await agent.createDraft(instruction, {
+    const review = await agent.startReview(instruction, {
       onToolCall: ({ name, args }) => {
         console.error(`[tool] ${name}(${JSON.stringify(args)})`);
       },
     });
 
     while (true) {
+      const snapshot = review.snapshot();
+
+      if (snapshot.status !== "reviewing") {
+        throw new Error(`Unexpected draft review status: ${snapshot.status}`);
+      }
+
       console.log();
-      console.log(formatNotionPageDraft(draft));
+      console.log(formatNotionPageDraft(snapshot.draft));
       const choice = await readTerminalLine(
         "[y] Create in Notion  [r] Revise  [n] Cancel\n> ",
       );
 
       if (choice === null) {
+        review.cancel();
         console.log("\nCanceled. Nothing was written to Notion.");
         return;
       }
@@ -195,6 +202,7 @@ async function askAgent(instruction: string): Promise<void> {
       const action = parseDraftReviewAction(choice);
 
       if (action === "cancel") {
+        review.cancel();
         console.log("Canceled. Nothing was written to Notion.");
         return;
       }
@@ -210,6 +218,7 @@ async function askAgent(instruction: string): Promise<void> {
         );
 
         if (revisionInstruction === null) {
+          review.cancel();
           console.log("\nCanceled. Nothing was written to Notion.");
           return;
         }
@@ -219,11 +228,12 @@ async function askAgent(instruction: string): Promise<void> {
           continue;
         }
 
-        draft = await agent.reviseDraft(draft, revisionInstruction);
+        await review.revise(revisionInstruction);
         continue;
       }
 
-      await createNotionPage(draft);
+      const approved = review.approve();
+      await createNotionPage(approved.draft);
       return;
     }
   } finally {

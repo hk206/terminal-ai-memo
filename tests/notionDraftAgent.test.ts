@@ -14,7 +14,7 @@ const initialDraft: NotionPageDraft = {
 };
 
 describe("NotionDraftAgent", () => {
-  test("creates a draft with memo tools and forwards tool events", async () => {
+  test("starts a review with memo tools and forwards tool events", async () => {
     const memoTool = createFakeMemoTool();
     const toolEvents: DraftToolCall[] = [];
     const model: DraftModel = {
@@ -30,11 +30,14 @@ describe("NotionDraftAgent", () => {
     };
     const agent = new NotionDraftAgent(model, [memoTool]);
 
-    const result = await agent.createDraft("今日のメモをまとめて", {
+    const review = await agent.startReview("今日のメモをまとめて", {
       onToolCall: (details) => toolEvents.push(details),
     });
 
-    expect(result).toEqual(initialDraft);
+    expect(review.snapshot()).toEqual({
+      status: "reviewing",
+      draft: initialDraft,
+    });
     expect(toolEvents).toEqual([{ name: "readMemo", args: { id: 1 } }]);
   });
 

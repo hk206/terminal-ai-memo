@@ -1,5 +1,6 @@
 import type { NotionPageDraft } from "../notion/draft";
 import type { AgentTool } from "../tools/types";
+import { DraftReviewSession } from "./draftReviewSession";
 
 export interface DraftToolCall {
   name: string;
@@ -38,6 +39,14 @@ export class NotionDraftAgent {
       tools: this.memoTools,
       onToolCall: options.onToolCall,
     });
+  }
+
+  async startReview(
+    instruction: string,
+    options: CreateDraftOptions = {},
+  ): Promise<DraftReviewSession> {
+    const draft = await this.createDraft(instruction, options);
+    return new DraftReviewSession(draft, this);
   }
 
   reviseDraft(
