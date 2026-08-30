@@ -13,7 +13,7 @@ describe("OAuth callback server", () => {
   });
 
   test("returns the authorization code when state matches", async () => {
-    server = await startOAuthCallbackServer();
+    server = await startOAuthCallbackServer(0);
     const codePromise = server.waitForCode("expected-state");
 
     const response = await fetch(
@@ -26,7 +26,7 @@ describe("OAuth callback server", () => {
   });
 
   test("rejects a callback whose state does not match", async () => {
-    server = await startOAuthCallbackServer();
+    server = await startOAuthCallbackServer(0);
     const codePromise = server.waitForCode("expected-state");
     const errorPromise = codePromise.catch((error: unknown) => error);
 
@@ -42,7 +42,7 @@ describe("OAuth callback server", () => {
   });
 
   test("reports an authorization error from Notion", async () => {
-    server = await startOAuthCallbackServer();
+    server = await startOAuthCallbackServer(0);
     const codePromise = server.waitForCode("expected-state");
     const errorPromise = codePromise.catch((error: unknown) => error);
 
@@ -58,7 +58,7 @@ describe("OAuth callback server", () => {
   });
 
   test("ignores unrelated browser requests", async () => {
-    server = await startOAuthCallbackServer();
+    server = await startOAuthCallbackServer(0);
 
     const response = await fetch(new URL("/favicon.ico", server.callbackUrl));
 

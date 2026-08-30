@@ -17,6 +17,32 @@ describe("NotionMcpConnection", () => {
     expect(await connection.listTools()).toEqual(client.tools);
   });
 
+  test("reads the connected Notion workspace identity", async () => {
+    const client = new FakeMcpClient();
+    client.toolResult = {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({
+            self: {
+              workspace: { id: "workspace-id", name: "My Workspace" },
+              user: { id: "user-id", name: "Hokuto" },
+            },
+          }),
+        },
+      ],
+    };
+    const connection = new NotionMcpConnection(client);
+
+    expect(await connection.getWorkspaceIdentity()).toEqual({
+      workspace: { id: "workspace-id", name: "My Workspace" },
+      user: { id: "user-id", name: "Hokuto" },
+    });
+    expect(client.toolCalls).toEqual([
+      { name: "notion-fetch", arguments: { id: "self" } },
+    ]);
+  });
+
   test("closes the underlying MCP client", async () => {
     const client = new FakeMcpClient();
     const connection = new NotionMcpConnection(client);
@@ -35,6 +61,11 @@ test("connectToNotionMcp rejects an empty OAuth token before connecting", async 
 
 class FakeMcpClient implements McpClientPort {
   tools: Array<{ name: string; description?: string }> = [];
+  toolResult: unknown = { content: [] };
+  toolCalls: Array<{
+    name: string;
+    arguments?: Record<string, unknown>;
+  }> = [];
   closed = false;
 
   async listTools(): Promise<{
@@ -45,5 +76,13 @@ class FakeMcpClient implements McpClientPort {
 
   async close(): Promise<void> {
     this.closed = true;
+  }
+
+  async callTool(request: {
+    name: string;
+    arguments?: Record<string, unknown>;
+  }): Promise<unknown> {
+    this.toolCalls.push(request);
+    return this.toolResult;
   }
 }

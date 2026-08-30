@@ -6,7 +6,11 @@ export type OAuthCallbackServer = {
   close(): Promise<void>;
 };
 
-export async function startOAuthCallbackServer(): Promise<OAuthCallbackServer> {
+export const NOTION_OAUTH_CALLBACK_PORT = 43119;
+
+export async function startOAuthCallbackServer(
+  port = NOTION_OAUTH_CALLBACK_PORT,
+): Promise<OAuthCallbackServer> {
   let expectedState: string | undefined;
   let resolveCode: ((code: string) => void) | undefined;
   let rejectCode: ((error: Error) => void) | undefined;
@@ -60,7 +64,7 @@ export async function startOAuthCallbackServer(): Promise<OAuthCallbackServer> {
     );
   });
 
-  await listenOnAvailablePort(server);
+  await listen(server, port);
   const address = server.address();
 
   if (!address || typeof address === "string") {
@@ -86,10 +90,10 @@ export async function startOAuthCallbackServer(): Promise<OAuthCallbackServer> {
   };
 }
 
-function listenOnAvailablePort(server: Server): Promise<void> {
+function listen(server: Server, port: number): Promise<void> {
   return new Promise((resolve, reject) => {
     server.once("error", reject);
-    server.listen(0, "127.0.0.1", () => {
+    server.listen(port, "127.0.0.1", () => {
       server.off("error", reject);
       resolve();
     });

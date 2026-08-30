@@ -2,7 +2,7 @@
 
 Terminal AI Memo is a local-first CLI inbox for capturing thoughts without leaving the terminal and organizing them with AI later.
 
-> This project is in early development. Memo capture and local SQLite storage are currently implemented; AI organization is not implemented yet.
+> This project is in early development. Local memo capture, Gemini-powered memo investigation, and Notion MCP authentication are implemented. Notion page creation is not connected yet.
 
 ## Requirements
 
@@ -51,6 +51,14 @@ bun run memo ask "今日一日分のメモをまとめて"
 Gemini can use the read-only `listMemos`, `searchMemos`, and `readMemo` Tools to investigate local memos before answering. Tool calls are shown in the terminal while the agent runs.
 
 The Gemini API free tier may use submitted content to improve Google's products. Use synthetic or non-sensitive memos while developing with the free tier.
+
+Connect to Notion's hosted MCP server:
+
+```bash
+bun run memo notion connect
+```
+
+The command opens Notion's OAuth page in the browser. OAuth credentials are stored in macOS Keychain; they are not written to `.env`, SQLite, or the repository. After authorization, the CLI displays the connected workspace and the MCP Tools available to it.
 
 On macOS, memos are stored by default at:
 

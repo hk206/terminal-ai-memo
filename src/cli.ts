@@ -2,6 +2,11 @@
 
 import { createGeminiAssistant } from "./gemini";
 import { readMemoInput } from "./input";
+import { KeychainSecretStore } from "./notion/keychainSecretStore";
+import { connectToNotionMcpWithOAuth } from "./notion/mcpClient";
+import { startOAuthCallbackServer } from "./notion/oauthCallbackServer";
+import { NotionOAuthProvider } from "./notion/oauthProvider";
+import { openExternalUrl } from "./notion/openUrl";
 import { selectOption } from "./select";
 import { MemoStore } from "./store";
 import type { Memo } from "./store";
@@ -30,6 +35,11 @@ async function main(): Promise<void> {
     return;
   }
 
+  if (args[0] === "notion") {
+    await runNotionCommand(args.slice(1));
+    return;
+  }
+
   const body =
     args.length > 0 ? args.join(" ") : await readInteractiveMemoBody();
 
@@ -49,6 +59,54 @@ async function main(): Promise<void> {
     console.log(`Saved memo #${memo.id}`);
   } finally {
     store.close();
+  }
+}
+
+async function runNotionCommand(args: string[]): Promise<void> {
+  if (args.length !== 1 || args[0] !== "connect") {
+    throw new Error("Usage: memo notion connect");
+  }
+
+  await connectNotion();
+}
+
+async function connectNotion(): Promise<void> {
+  const callbackServer = await startOAuthCallbackServer();
+  const provider = new NotionOAuthProvider(
+    new KeychainSecretStore(),
+    callbackServer.callbackUrl,
+    async (authorizationUrl) => {
+      console.log("Opening Notion authorization in your browser...");
+
+      if (!(await openExternalUrl(authorizationUrl))) {
+        console.log("Could not open the browser. Open this URL manually:");
+        console.log(authorizationUrl.toString());
+      }
+    },
+  );
+  const authorizationCode = callbackServer.waitForCode(provider.state());
+  let connection;
+
+  console.log("Connecting to Notion MCP...");
+
+  try {
+    connection = await connectToNotionMcpWithOAuth(
+      provider,
+      () => authorizationCode,
+    );
+    const [identity, tools] = await Promise.all([
+      connection.getWorkspaceIdentity(),
+      connection.listTools(),
+    ]);
+
+    console.log(
+      `Connected to ${identity.workspace.name} as ${identity.user.name}.`,
+    );
+    console.log(`Available MCP tools: ${tools.length}`);
+    console.log(tools.map((tool) => tool.name).join(", "));
+  } finally {
+    await connection?.close();
+    await callbackServer.close();
   }
 }
 
