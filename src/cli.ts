@@ -3,17 +3,15 @@
 import { createInterface } from "node:readline";
 import { APP_VERSION, createHelpText } from "./appMetadata";
 import type { Memo } from "./core/memo";
-import { createNotionDraftAgent } from "./createNotionDraftAgent";
-import { createNotionPublisher } from "./createNotionPublisher";
+import type { TeletypeMemoApplication } from "./core/teletypeMemoApplication";
 import { readMemoInput } from "./input";
 import { formatNotionPageDraft } from "./notion/draft";
 import { parseDraftReviewAction } from "./notion/draftReview";
-import {
-  withNotionConnection,
-  type NotionConnectionEvents,
-} from "./notion/withNotionConnection";
 import { openExternalUrl } from "./notion/openUrl";
-import { openTeletypeMemoCore } from "./openTeletypeMemoCore";
+import {
+  openTeletypeMemoApplication,
+  type TeletypeMemoApplicationEvents,
+} from "./openTeletypeMemoApplication";
 import { selectOption } from "./select";
 
 async function main(): Promise<void> {
@@ -31,28 +29,43 @@ async function main(): Promise<void> {
     return;
   }
 
+  const application = openTeletypeMemoApplication({
+    events: createApplicationEvents(),
+  });
+
+  try {
+    await runCommand(application, args);
+  } finally {
+    application.close();
+  }
+}
+
+async function runCommand(
+  application: TeletypeMemoApplication,
+  args: string[],
+): Promise<void> {
   if (args[0] === "list") {
-    listMemos(parseListLimit(args.slice(1)));
+    listMemos(application, parseListLimit(args.slice(1)));
     return;
   }
 
   if (args[0] === "show") {
-    await showMemoCommand(args.slice(1));
+    await showMemoCommand(application, args.slice(1));
     return;
   }
 
   if (args[0] === "search") {
-    searchMemos(parseSearchQuery(args.slice(1)));
+    searchMemos(application, parseSearchQuery(args.slice(1)));
     return;
   }
 
   if (args[0] === "ask") {
-    await askAgent(parseAskInstruction(args.slice(1)));
+    await askAgent(application, parseAskInstruction(args.slice(1)));
     return;
   }
 
   if (args[0] === "notion") {
-    await runNotionCommand(args.slice(1));
+    await runNotionCommand(application, args.slice(1));
     return;
   }
 
@@ -68,150 +81,134 @@ async function main(): Promise<void> {
     return;
   }
 
-  const core = openTeletypeMemoCore();
-
-  try {
-    const memo = core.captureMemo(body);
-    console.log(`Saved memo #${memo.id}`);
-  } finally {
-    core.close();
-  }
+  const memo = application.captureMemo(body);
+  console.log(`Saved memo #${memo.id}`);
 }
 
-async function runNotionCommand(args: string[]): Promise<void> {
+async function runNotionCommand(
+  application: TeletypeMemoApplication,
+  args: string[],
+): Promise<void> {
   if (args.length !== 1 || args[0] !== "connect") {
     throw new Error("Usage: memo notion connect");
   }
 
-  await connectNotion();
+  await connectNotion(application);
 }
 
-async function connectNotion(): Promise<void> {
-  await withNotionConnection(
-    async (connection) => {
-      const [identity, tools] = await Promise.all([
-        connection.getWorkspaceIdentity(),
-        connection.listTools(),
-      ]);
+async function connectNotion(
+  application: TeletypeMemoApplication,
+): Promise<void> {
+  const connection = await application.inspectNotionConnection();
 
-      console.log(
-        `Connected to ${identity.workspace.name} as ${identity.user.name}.`,
-      );
-      console.log(`Available MCP tools: ${tools.length}`);
-      console.log(tools.map((tool) => tool.name).join(", "));
-    },
-    createNotionConnectionEvents(),
+  console.log(
+    `Connected to ${connection.workspace.name} as ${connection.user.name}.`,
   );
+  console.log(`Available MCP tools: ${connection.tools.length}`);
+  console.log(connection.tools.map((tool) => tool.name).join(", "));
 }
 
-function listMemos(limit: number): void {
-  const core = openTeletypeMemoCore();
+function listMemos(
+  application: TeletypeMemoApplication,
+  limit: number,
+): void {
+  const memos = application.listMemos(limit);
+  printMemoSummaries(memos, "No memos found.");
+}
 
-  try {
-    const memos = core.listMemos(limit);
-    printMemoSummaries(memos, "No memos found.");
-  } finally {
-    core.close();
+function searchMemos(
+  application: TeletypeMemoApplication,
+  query: string,
+): void {
+  const memos = application.searchMemos(query);
+  printMemoSummaries(memos, `No memos found for "${query}".`);
+}
+
+async function askAgent(
+  application: TeletypeMemoApplication,
+  instruction: string,
+): Promise<void> {
+  const review = await application.startNotionReview(instruction, {
+    onToolCall: ({ name, args }) => {
+      console.error(`[tool] ${name}(${JSON.stringify(args)})`);
+    },
+  });
+
+  while (true) {
+    const snapshot = review.snapshot();
+
+    if (snapshot.status !== "reviewing") {
+      throw new Error(`Unexpected draft review status: ${snapshot.status}`);
+    }
+
+    console.log();
+    console.log(formatNotionPageDraft(snapshot.draft));
+    const choice = await readTerminalLine(
+      "[y] Create in Notion  [r] Revise  [n] Cancel\n> ",
+    );
+
+    if (choice === null) {
+      review.cancel();
+      console.log("\nCanceled. Nothing was written to Notion.");
+      return;
+    }
+
+    const action = parseDraftReviewAction(choice);
+
+    if (action === "cancel") {
+      review.cancel();
+      console.log("Canceled. Nothing was written to Notion.");
+      return;
+    }
+
+    if (action === "invalid") {
+      console.log("Enter y to create, r to revise, or n to cancel.");
+      continue;
+    }
+
+    if (action === "revise") {
+      const revisionInstruction = await readTerminalLine(
+        "Revision instruction: ",
+      );
+
+      if (revisionInstruction === null) {
+        review.cancel();
+        console.log("\nCanceled. Nothing was written to Notion.");
+        return;
+      }
+
+      if (revisionInstruction.trim().length === 0) {
+        console.log("Revision instruction cannot be empty.");
+        continue;
+      }
+
+      await review.revise(revisionInstruction);
+      continue;
+    }
+
+    const approved = review.approve();
+    const page = await application.publishNotionReview(approved);
+    console.log(`Created Notion page: ${page.url}`);
+    return;
   }
 }
 
-function searchMemos(query: string): void {
-  const core = openTeletypeMemoCore();
-
-  try {
-    const memos = core.searchMemos(query);
-    printMemoSummaries(memos, `No memos found for "${query}".`);
-  } finally {
-    core.close();
-  }
-}
-
-async function askAgent(instruction: string): Promise<void> {
-  const core = openTeletypeMemoCore();
-  const agent = createNotionDraftAgent(core, {
-    onRetry: ({ status, nextAttempt, maxAttempts, delayMilliseconds }) => {
+function createApplicationEvents(): TeletypeMemoApplicationEvents {
+  return {
+    onDraftRetry: ({
+      status,
+      nextAttempt,
+      maxAttempts,
+      delayMilliseconds,
+    }) => {
       const delaySeconds = (delayMilliseconds / 1_000).toFixed(1);
       console.error(
         `Gemini returned ${status}; retrying in ${delaySeconds}s ` +
           `(${nextAttempt}/${maxAttempts})...`,
       );
     },
-  });
-  const publisher = createNotionPublisher(createNotionConnectionEvents());
-
-  try {
-    const review = await agent.startReview(instruction, {
-      onToolCall: ({ name, args }) => {
-        console.error(`[tool] ${name}(${JSON.stringify(args)})`);
-      },
-    });
-
-    while (true) {
-      const snapshot = review.snapshot();
-
-      if (snapshot.status !== "reviewing") {
-        throw new Error(`Unexpected draft review status: ${snapshot.status}`);
-      }
-
-      console.log();
-      console.log(formatNotionPageDraft(snapshot.draft));
-      const choice = await readTerminalLine(
-        "[y] Create in Notion  [r] Revise  [n] Cancel\n> ",
-      );
-
-      if (choice === null) {
-        review.cancel();
-        console.log("\nCanceled. Nothing was written to Notion.");
-        return;
-      }
-
-      const action = parseDraftReviewAction(choice);
-
-      if (action === "cancel") {
-        review.cancel();
-        console.log("Canceled. Nothing was written to Notion.");
-        return;
-      }
-
-      if (action === "invalid") {
-        console.log("Enter y to create, r to revise, or n to cancel.");
-        continue;
-      }
-
-      if (action === "revise") {
-        const revisionInstruction = await readTerminalLine(
-          "Revision instruction: ",
-        );
-
-        if (revisionInstruction === null) {
-          review.cancel();
-          console.log("\nCanceled. Nothing was written to Notion.");
-          return;
-        }
-
-        if (revisionInstruction.trim().length === 0) {
-          console.log("Revision instruction cannot be empty.");
-          continue;
-        }
-
-        await review.revise(revisionInstruction);
-        continue;
-      }
-
-      const approved = review.approve();
-      const page = await publisher.publish(approved);
-      console.log(`Created Notion page: ${page.url}`);
-      return;
-    }
-  } finally {
-    core.close();
-  }
-}
-
-function createNotionConnectionEvents(): NotionConnectionEvents {
-  return {
-    onConnecting: () => console.log("Connecting to Notion MCP..."),
-    async onAuthorizationUrl(authorizationUrl) {
+    onNotionConnecting: () => console.log("Connecting to Notion MCP..."),
+    async onNotionAuthorizationUrl(authorizationUrl) {
       console.log("Opening Notion authorization in your browser...");
 
       if (!(await openExternalUrl(authorizationUrl))) {
@@ -259,49 +256,46 @@ function printMemoSummaries(memos: Memo[], emptyMessage: string): void {
   }
 }
 
-async function showMemoCommand(args: string[]): Promise<void> {
+async function showMemoCommand(
+  application: TeletypeMemoApplication,
+  args: string[],
+): Promise<void> {
   if (args.length > 1) {
     throw new Error("Usage: memo show [id]");
   }
 
-  const core = openTeletypeMemoCore();
+  if (args.length === 1) {
+    const id = parseMemoId(args[0]!);
+    const memo = application.getMemo(id);
 
-  try {
-    if (args.length === 1) {
-      const id = parseMemoId(args[0]!);
-      const memo = core.getMemo(id);
-
-      if (!memo) {
-        throw new Error(`Memo #${id} not found`);
-      }
-
-      printMemo(memo);
-      return;
+    if (!memo) {
+      throw new Error(`Memo #${id} not found`);
     }
 
-    const candidates = core.listMemos(10);
-
-    if (candidates.length === 0) {
-      console.log("No memos found.");
-      return;
-    }
-
-    const selectedMemo = await selectOption(
-      candidates.map((memo) => ({
-        label: `#${memo.id}  ${createPreview(memo.body)}`,
-        value: memo,
-      })),
-    );
-
-    if (!selectedMemo) {
-      console.log("Canceled.");
-      return;
-    }
-
-    printMemo(selectedMemo);
-  } finally {
-    core.close();
+    printMemo(memo);
+    return;
   }
+
+  const candidates = application.listMemos(10);
+
+  if (candidates.length === 0) {
+    console.log("No memos found.");
+    return;
+  }
+
+  const selectedMemo = await selectOption(
+    candidates.map((memo) => ({
+      label: `#${memo.id}  ${createPreview(memo.body)}`,
+      value: memo,
+    })),
+  );
+
+  if (!selectedMemo) {
+    console.log("Canceled.");
+    return;
+  }
+
+  printMemo(selectedMemo);
 }
 
 function printMemo(memo: Memo): void {

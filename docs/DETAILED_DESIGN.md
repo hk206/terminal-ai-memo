@@ -26,17 +26,18 @@ Teletype Memoは、次の4つの領域から構成される。
 3. **人間による承認UI**：下書きをプレビューし、作成・修正・キャンセルを選ぶ。
 4. **Notion連携**：OAuth認証済みのMCPクライアントとしてNotionページを作る。
 
-現在の実装はCLIをフロントエンドにしている。ローカルメモ操作、AI下書きの生成・修正、承認状態の遷移、承認済み下書きの公開は共通Coreへ分離されている。CLIに残るのはターミナル表示、キー入力、OAuth URLを開くといったプレゼンテーション責務である。CLIは廃止せず、開発・デバッグ・自動化用フロントエンドとして残す。
+現在の実装はCLIをフロントエンドにしている。ローカルメモ操作、AI下書きの生成・修正、承認状態の遷移、承認済み下書きの公開は個別のCoreへ分離され、`TeletypeMemoApplication`がそれらの統一窓口になる。CLIに残るのはターミナル表示、キー入力、OAuth URLを開くといったプレゼンテーション責務である。CLIは廃止せず、開発・デバッグ・自動化用フロントエンドとして残す。
 
 ```mermaid
 flowchart LR
     User["ユーザー"] --> CLI["src/cli.ts\nコマンド振り分け"]
     CLI --> Input["入力UI"]
-    CLI --> Core["TeletypeMemoCore"]
+    CLI --> App["TeletypeMemoApplication\n共通Application API"]
+    App --> Core["TeletypeMemoCore"]
     Core --> Store["MemoStore\nSQLite adapter"]
     Store --> SQLite[("SQLite")]
 
-    CLI --> Agent["NotionDraftAgent"]
+    App --> Agent["NotionDraftAgent"]
     Agent --> Gemini["DraftModel\nGeminiAssistant"]
     Gemini --> Tools["Memo Tools"]
     Tools --> Core
@@ -46,7 +47,8 @@ flowchart LR
     Review -->|approve / revise / cancel| Session
     Session -->|revise| Agent
     Session -->|canceled| Stop["書き込まず終了"]
-    Session -->|approved| Publisher["NotionPublisher"]
+    Session -->|approved| App
+    App --> Publisher["NotionPublisher"]
     Publisher --> Connection["withNotionConnection"]
     Connection --> OAuth["OAuth + PKCE"]
     OAuth --> Keychain["macOS Keychain"]
@@ -57,9 +59,11 @@ flowchart LR
 ### 2.1 重要な設計境界
 
 - メモ保存はGeminiやNotionへ依存しない。
-- CLIとAI Toolsは`MemoStore`を直接使わず、共通Coreだけを使う。
+- CLIは個別Coreや外部adapterを組み立てず、`TeletypeMemoApplication`だけを利用する。
+- ApplicationはSQLite、Gemini、Notion依存を初回利用時まで生成しない。
+- ApplicationとAI Toolsは`MemoStore`を直接使わず、共通Coreだけを使う。
 - Core本体はSQLite実装ではなく`MemoRepository` interfaceへ依存する。
-- CLIはGeminiとMemo Toolsを直接組み立てず、`NotionDraftAgent`を使う。
+- CLIはGemini、Memo Tools、`NotionDraftAgent`を直接扱わず、Applicationへレビュー開始を依頼する。
 - `NotionDraftAgent`はGemini固有型ではなく`DraftModel` interfaceへ依存する。
 - `DraftReviewSession`はターミナル文字列を知らず、意味的なapprove/revise/cancelだけを扱う。
 - `NotionPublisher`は承認済み状態だけを受け取り、`NotionPageDestination`ポートへ公開を委譲する。
@@ -112,10 +116,12 @@ flowchart LR
 | [src/config.ts](../src/config.ts) | SQLiteファイルの保存パス決定 |
 | [src/core/memo.ts](../src/core/memo.ts) | Memoドメイン型と永続化用`MemoRepository`ポート |
 | [src/core/teletypeMemoCore.ts](../src/core/teletypeMemoCore.ts) | フロントエンド非依存のローカルメモ用ユースケースAPI |
+| [src/core/teletypeMemoApplication.ts](../src/core/teletypeMemoApplication.ts) | 全ユースケースを束ねるフロントエンド共通Application API |
 | [src/core/notionDraftAgent.ts](../src/core/notionDraftAgent.ts) | 下書き生成・修正ユースケースと`DraftModel`ポート |
 | [src/core/draftReviewSession.ts](../src/core/draftReviewSession.ts) | reviewing/revising/approved/canceledの状態機械 |
 | [src/core/notionPublisher.ts](../src/core/notionPublisher.ts) | 承認済み下書きだけを外部公開するユースケースと出力先ポート |
 | [src/openTeletypeMemoCore.ts](../src/openTeletypeMemoCore.ts) | CoreとSQLite版`MemoStore`を組み立てるcomposition root |
+| [src/openTeletypeMemoApplication.ts](../src/openTeletypeMemoApplication.ts) | Application、各Core、外部adapter、UIイベントを遅延構成するcomposition root |
 | [src/createNotionDraftAgent.ts](../src/createNotionDraftAgent.ts) | Agent、Gemini、Memo Toolsを組み立てるcomposition root |
 | [src/createNotionPublisher.ts](../src/createNotionPublisher.ts) | PublisherとHosted Notion接続adapterを組み立てるcomposition root |
 | [src/store.ts](../src/store.ts) | `MemoRepository`を実装するSQLite adapterとスキーマ |
@@ -139,6 +145,7 @@ flowchart LR
 | --- | --- |
 | [tests/store.test.ts](../tests/store.test.ts) | SQLite保存、取得、一覧、検索、日付範囲、入力拒否 |
 | [tests/teletypeMemoCore.test.ts](../tests/teletypeMemoCore.test.ts) | Coreの追記、取得、一覧、検索、日付範囲 |
+| [tests/teletypeMemoApplication.test.ts](../tests/teletypeMemoApplication.test.ts) | 統一API、依存の遅延生成、公開・接続の委譲、close |
 | [tests/notionDraftAgent.test.ts](../tests/notionDraftAgent.test.ts) | 下書きAgentのTool注入、イベント転送、修正 |
 | [tests/draftReviewSession.test.ts](../tests/draftReviewSession.test.ts) | 承認・取消・修正中・失敗復旧・終端状態 |
 | [tests/notionPublisher.test.ts](../tests/notionPublisher.test.ts) | 承認済み下書きの公開と未承認状態の拒否 |
@@ -219,7 +226,7 @@ PRDに記載されていても、次は`src/cli.ts`に未実装である。
 list → show → search → ask → notion → 通常メモ保存
 ```
 
-ローカルメモを使うユースケースは`openTeletypeMemoCore()`でCoreを開き、`try/finally`で必ず`close()`する。CLIは`MemoStore`を直接importしない。具体的なSQLite adapterの組み立ては`src/openTeletypeMemoCore.ts`へ集約する。
+helpとversion以外では`openTeletypeMemoApplication()`を1回だけ呼び、`try/finally`で必ず`close()`する。コマンド関数は同じApplicationインスタンスを受け取り、個別Core、SQLite、Gemini、Notion接続を直接importしない。
 
 ### 6.3 メモ保存フロー
 
@@ -228,6 +235,7 @@ sequenceDiagram
     actor U as User
     participant C as cli.ts
     participant I as input.ts
+    participant A as TeletypeMemoApplication
     participant Core as TeletypeMemoCore
     participant S as MemoStore
     participant D as SQLite
@@ -238,14 +246,17 @@ sequenceDiagram
         I-->>C: submitted(body) / canceled
     end
     C->>C: 空文字検証
-    C->>Core: captureMemo(body)
+    C->>A: captureMemo(body)
+    A->>Core: captureMemo(body)
     Core->>S: create(body)
     S->>D: INSERT
     S->>D: SELECT inserted id
     S-->>Core: Memo
-    Core-->>C: Memo
+    Core-->>A: Memo
+    A-->>C: Memo
     C-->>U: Saved memo #ID
-    C->>Core: close()
+    C->>A: close()
+    A->>Core: close()
 ```
 
 ### 6.4 `memo ask`フロー
@@ -254,6 +265,7 @@ sequenceDiagram
 sequenceDiagram
     actor U as User
     participant C as CLI
+    participant App as TeletypeMemoApplication
     participant A as NotionDraftAgent
     participant R as DraftReviewSession
     participant P as NotionPublisher
@@ -265,7 +277,8 @@ sequenceDiagram
     participant M as Notion MCP
 
     U->>C: memo ask instruction
-    C->>A: startReview(instruction)
+    C->>App: startNotionReview(instruction)
+    App->>A: startReview(instruction)
     A->>G: createNotionDraft(instruction, memoTools)
     loop 最大6ステップ
         G->>G: Gemini Generate Content
@@ -281,7 +294,8 @@ sequenceDiagram
         end
     end
     A->>R: new DraftReviewSession(draft)
-    A-->>C: ReviewSession
+    A-->>App: ReviewSession
+    App-->>C: ReviewSession
     C->>R: snapshot()
     C-->>U: title/body/source IDsを表示
     alt n または空Enter
@@ -299,13 +313,15 @@ sequenceDiagram
     else y
         C->>R: approve()
         R-->>C: approved(draft)
-        C->>P: publish(approved)
+        C->>App: publishNotionReview(approved)
+        App->>P: publish(approved)
         P->>W: createPage(draft)
         W->>M: OAuth済み接続
         W->>M: notion-create-pages
         M-->>W: page id / URL
         W-->>P: page id / URL
-        P-->>C: page id / URL
+        P-->>App: page id / URL
+        App-->>C: page id / URL
         C-->>U: Created Notion page: URL
     end
 ```
@@ -326,11 +342,27 @@ sequenceDiagram
 
 `parseDraftReviewAction()`はCLI固有の文字列を解釈するだけで、状態を持たない。解釈後の操作はCoreの`approve()`、`revise()`、`cancel()`へ渡す。将来のデスクトップUIは文字列parserを使わず、各ボタンから同じCoreメソッドを直接呼べる。
 
-## 7. 共通Coreとローカルメモ層
+## 7. Application API、共通Core、ローカルメモ層
 
-### 7.1 Coreの境界
+### 7.1 Application APIの境界
 
-`TeletypeMemoCore`は、CLIや将来のデスクトップUIが使うフロントエンド非依存APIである。
+`TeletypeMemoApplication`はCLIと将来のデスクトップUIが共有する、アプリケーション全体で唯一の入口である。
+
+| Applicationメソッド | 委譲先 | 用途 |
+| --- | --- | --- |
+| `captureMemo()`、`getMemo()`、`listMemos()`、`listMemosByDate()`、`searchMemos()` | `TeletypeMemoCore` | 追記専用ローカルメモ操作 |
+| `startNotionReview()` | `NotionDraftAgent` | AI下書きを生成してレビューを開始 |
+| `publishNotionReview()` | `NotionPublisher` | 承認済み下書きだけをNotionへ公開 |
+| `inspectNotionConnection()` | Hosted Notion接続adapter | workspace、user、Tool一覧を取得 |
+| `close()` | 生成済み`TeletypeMemoCore` | SQLiteリソースを1回だけ閉じる |
+
+Applicationは依存を遅延生成する。インスタンス作成時にはSQLiteを開かず、Gemini APIキーも検証せず、Notionへも接続しない。たとえば`captureMemo()`だけを使った場合、Draft AgentとPublisherのfactoryは一度も呼ばれない。終了後の操作は明示的な例外にし、`close()`自体は複数回呼んでも安全である。
+
+`openTeletypeMemoApplication()`が本番用composition rootである。SQLite、Gemini、Memo Tools、Publisher、OAuth/MCP adapterを組み立て、リトライやOAuth URLなどをUIイベントとして受け取る。CLIと将来のデスクトップUIの違いは、このイベントをstderr、ブラウザ、小型ウィンドウなどへどう表示するかに限定できる。
+
+### 7.2 Coreの境界
+
+`TeletypeMemoCore`は、ApplicationやAI Toolsが使うフロントエンド非依存のローカルメモAPIである。
 
 | Coreメソッド | 用途 |
 | --- | --- |
@@ -343,9 +375,9 @@ sequenceDiagram
 
 公開APIには更新・削除メソッドを置かない。これは「原文は追記専用」というプロダクト制約をフロントエンド境界にも反映するためである。
 
-Coreは`MemoRepository` interfaceだけを受け取り、SQLiteを知らない。`openTeletypeMemoCore()`が`MemoStore`を注入するため、将来別の永続化adapterやFakeへ差し替えられる。
+Coreは`MemoRepository` interfaceだけを受け取り、SQLiteを知らない。`openTeletypeMemoCore()`が`MemoStore`を注入し、さらに`openTeletypeMemoApplication()`がそれを遅延factoryとしてApplicationへ渡す。将来別の永続化adapterやFakeへ差し替えられる。
 
-### 7.2 DBパス決定
+### 7.3 DBパス決定
 
 `src/config.ts`の`getDatabasePath()`は次の優先順位でパスを決める。
 
@@ -356,7 +388,7 @@ Coreは`MemoRepository` interfaceだけを受け取り、SQLiteを知らない�
 
 `MemoStore`はインメモリDBでない限り、親ディレクトリを再帰的に作る。
 
-### 7.3 SQLiteスキーマ
+### 7.4 SQLiteスキーマ
 
 ```sql
 CREATE TABLE memos (
@@ -375,7 +407,7 @@ CREATE TABLE memos (
 
 `PRAGMA journal_mode = WAL`を設定する。WAL用の`*.db-wal`と`*.db-shm`はGit対象外である。
 
-### 7.4 TypeScriptモデル
+### 7.5 TypeScriptモデル
 
 公開する`Memo`と`MemoRepository`は`src/core/memo.ts`に置く。`MemoRow`はSQLite adapter内部のsnake_case、公開する`Memo`はcamelCaseを使い、`toMemo()`が境界で変換する。
 
@@ -389,7 +421,7 @@ CREATE TABLE memos (
 | `project`、`projectRoot` | 将来のプロジェクト関連付け用。現状は未使用 |
 | `title`、`summary` | 将来のAI整理結果用。現状は未使用 |
 
-### 7.5 MemoStoreの操作
+### 7.6 MemoStoreの操作
 
 | メソッド | 実装 |
 | --- | --- |
@@ -402,7 +434,7 @@ CREATE TABLE memos (
 
 検索に`LIKE`を使わないため、`%`や`_`はワイルドカードではなく通常文字として扱われる。
 
-### 7.6 入力UI
+### 7.7 入力UI
 
 `src/input.ts`はNode互換`readline`を使う。
 
@@ -414,7 +446,7 @@ CREATE TABLE memos (
 
 現在は空行が送信操作なので、メモ本文の途中に空行を保存できない。
 
-### 7.7 `show`選択UI
+### 7.8 `show`選択UI
 
 `src/select.ts`はTTY専用で、入力をraw modeへ切り替える。
 
@@ -857,10 +889,11 @@ Notion MCPのTool結果はMCP content blockとして返る。現在は次を前�
 
 ### 14.2 テストが保証する範囲
 
-現在の79テストは、次を保証する。
+現在の82テストは、次を保証する。
 
 | 領域 | 主な保証 |
 | --- | --- |
+| Application | 統一APIから各Coreへの委譲、SQLite・AI・Notion依存の遅延生成、冪等close、終了後操作の拒否 |
 | Core | 追記、ID取得、一覧、検索、日付範囲、SQLite adapterとの組み立て |
 | Draft Agent | Memo Toolsの注入、Toolイベント転送、モデルポート経由の修正 |
 | Review Session | 承認、取消、修正中の競合拒否、修正成功、失敗時の復旧、終端状態 |
@@ -891,6 +924,7 @@ Notion MCPのTool結果はMCP content blockとして返る。現在は次を前�
 - 応答しないGeminiリクエストに上限がない問題をE2E中に発見し、60秒のSDKタイムアウト設定と回帰テストを追加した。
 - `NotionDraftAgent`抽出後も、合成メモで`searchMemos`、`listMemos`、`readMemo`、プレビュー、`n`による未作成終了を再確認した。
 - `NotionPublisher`抽出後、Geminiを介さない承認済み合成下書きをCoreへ渡し、Hosted Notion MCPにPrivateページを1件作成できることを再確認した。
+- 2026-08-31にApplication API移行後のCLIから専用一時DBへ保存し、一覧と検索で同じメモを取得できることを確認した。一時DBは確認後に削除した。
 
 この確認では`GEMINI_MODEL=gemini-3.6-flash`をコマンド単位で明示した。ローカル設定で選ばれていた3.7 Flashは確認時に504を返したため、モデル名の上書きが実際の挙動へ反映されることも確認できた。
 
@@ -973,6 +1007,7 @@ NotionのAPIキーやOAuthトークンを環境変数へ置く設計ではない
 | やりたい変更 | 主に変更するファイル |
 | --- | --- |
 | 新しいCLIコマンド | `src/cli.ts` |
+| フロントエンド共通操作・イベント追加 | `src/core/teletypeMemoApplication.ts`、`src/openTeletypeMemoApplication.ts`、Applicationテスト |
 | メモのユースケース追加 | `src/core/teletypeMemoCore.ts`、`src/core/memo.ts`、Coreテスト |
 | メモ項目・SQLiteクエリ追加 | `src/store.ts`、DB migration、Storeテスト |
 | AI下書きユースケース変更 | `src/core/notionDraftAgent.ts`、`src/createNotionDraftAgent.ts`、Agentテスト |
@@ -988,18 +1023,19 @@ NotionのAPIキーやOAuthトークンを環境変数へ置く設計ではない
 
 ## 18. 学習するときの推奨読解順
 
-1. `src/cli.ts`でフロントエンド全体を見る。
-2. `src/core/memo.ts`と`src/core/teletypeMemoCore.ts`で共通APIと依存逆転を理解する。
-3. `src/openTeletypeMemoCore.ts`、`src/store.ts`、`src/input.ts`でSQLite adapterとCLI入力を見る。
-4. `src/core/notionDraftAgent.ts`と`src/createNotionDraftAgent.ts`でモデルポートと組み立てを見る。
-5. `src/core/draftReviewSession.ts`でUI非依存の承認状態機械を見る。
-6. `src/core/notionPublisher.ts`と`src/createNotionPublisher.ts`で承認済み公開の境界を見る。
-7. `src/tools/types.ts`と`src/tools/memoTools.ts`でAI Toolsも同じCoreを使うことを確認する。
-8. `src/gemini.ts`の`runAgent()`でエージェントループを追う。
-9. `src/notion/draft.ts`と`draftReview.ts`で構造化出力とCLI入力解釈を見る。
-10. `withNotionConnection.ts`、`oauthCallbackServer.ts`、`oauthProvider.ts`、`keychainSecretStore.ts`で接続ライフサイクルとOAuthを追う。
-11. `mcpClient.ts`で認証後のMCP Tool実行を見る。
-12. 対応するテストを読み、依存をFakeへ置き換える方法を確認する。
+1. `src/cli.ts`で表示とキー入力だけを担当するフロントエンドを見る。
+2. `src/core/teletypeMemoApplication.ts`と`src/openTeletypeMemoApplication.ts`で統一APIと遅延composition rootを見る。
+3. `src/core/memo.ts`と`src/core/teletypeMemoCore.ts`でメモAPIと依存逆転を理解する。
+4. `src/openTeletypeMemoCore.ts`、`src/store.ts`、`src/input.ts`でSQLite adapterとCLI入力を見る。
+5. `src/core/notionDraftAgent.ts`と`src/createNotionDraftAgent.ts`でモデルポートと組み立てを見る。
+6. `src/core/draftReviewSession.ts`でUI非依存の承認状態機械を見る。
+7. `src/core/notionPublisher.ts`と`src/createNotionPublisher.ts`で承認済み公開の境界を見る。
+8. `src/tools/types.ts`と`src/tools/memoTools.ts`でAI Toolsも同じCoreを使うことを確認する。
+9. `src/gemini.ts`の`runAgent()`でエージェントループを追う。
+10. `src/notion/draft.ts`と`draftReview.ts`で構造化出力とCLI入力解釈を見る。
+11. `withNotionConnection.ts`、`oauthCallbackServer.ts`、`oauthProvider.ts`、`keychainSecretStore.ts`で接続ライフサイクルとOAuthを追う。
+12. `mcpClient.ts`で認証後のMCP Tool実行を見る。
+13. 対応するテストを読み、依存をFakeへ置き換える方法を確認する。
 
 特に学習上の中心は、次の2本である。
 
