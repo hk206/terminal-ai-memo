@@ -97,6 +97,7 @@ flowchart LR
 | --- | --- |
 | [README.md](../README.md) | セットアップ、基本コマンド、利用者向け説明 |
 | [docs/PRD.md](./PRD.md) | プロダクト価値、MVP要件、受け入れ条件、開発フェーズ |
+| [docs/DESKTOP_MVP.md](./DESKTOP_MVP.md) | デスクトップ版の技術選定、プロセス境界、段階的実装計画 |
 | `docs/DETAILED_DESIGN.md` | 現在のコードを説明する本書 |
 | [package.json](../package.json) | パッケージ情報、`memo`のbin、スクリプト、依存関係 |
 | `bun.lock` | Bunが生成する依存バージョン固定ファイル。手動編集しない |

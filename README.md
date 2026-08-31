@@ -93,4 +93,4 @@ bun test
 bun run typecheck
 ```
 
-See [docs/PRD.md](docs/PRD.md) for the product requirements and roadmap, and [docs/DETAILED_DESIGN.md](docs/DETAILED_DESIGN.md) for a file-by-file explanation of the current implementation.
+See [docs/PRD.md](docs/PRD.md) for the product requirements and roadmap, [docs/DETAILED_DESIGN.md](docs/DETAILED_DESIGN.md) for a file-by-file explanation of the current implementation, and [docs/DESKTOP_MVP.md](docs/DESKTOP_MVP.md) for the desktop architecture decision and staged implementation plan.
